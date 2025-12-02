@@ -1,0 +1,3593 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faChevronLeft,
+  faChevronRight,
+  faChevronDown,
+  faChevronUp,
+  faPlus,
+  faEdit,
+  faTrash,
+  faCalendarAlt,
+  faBook,
+  faFileAlt,
+  faClipboardList,
+  faCopy,
+  faClock,
+  faArrowLeft,
+  faRobot,
+  faChartLine,
+  faFileExport,
+  faFileImport,
+  faPrint,
+  faSave,
+  faHistory,
+  faTimes,
+  faGripLines,
+  faExpandArrowsAlt
+} from '@fortawesome/free-solid-svg-icons';
+import './OgrenciProgramTab.css';
+import { EXAM_SUBJECTS_BY_AREA } from '../constants/examSubjects';
+import cografyaImg from '../assets/cografya.png';
+import edebiyatImg from '../assets/edebiyat.png';
+import dinImg from '../assets/din.png';
+import felsefeImg from '../assets/felsefe.png';
+import lgsFenImg from '../assets/lgs_fen.png';
+import lgsInkilapImg from '../assets/lgs_inkilap.png';
+import sosyalImg from '../assets/sosyal.png';
+import tarihImg from '../assets/tarih.png';
+import tumBiyolojiImg from '../assets/tum_biyoloji.png';
+import tumFizikImg from '../assets/tum_fizik.png';
+import tumGeometriImg from '../assets/tum_geometri.png';
+import tumIngilizceImg from '../assets/tum_ingilizce.png';
+import tumKimyaImg from '../assets/tum_kimya.png';
+import tumMatematikImg from '../assets/tum_matematik.png';
+import tumTurkceImg from '../assets/tum_turkce.png';
+
+const DAY_OPTIONS = [
+  { value: 1, label: 'Pazartesi', short: 'Pzt' },
+  { value: 2, label: 'Salı', short: 'Sal' },
+  { value: 3, label: 'Çarşamba', short: 'Çar' },
+  { value: 4, label: 'Perşembe', short: 'Per' },
+  { value: 5, label: 'Cuma', short: 'Cum' },
+  { value: 6, label: 'Cumartesi', short: 'Cmt' },
+  { value: 7, label: 'Pazar', short: 'Paz' }
+];
+
+const DAY_LABELS_SHORT = DAY_OPTIONS.reduce((acc, day) => {
+  acc[day.value] = day.short;
+  return acc;
+}, {});
+
+// Modern, yüksek kontrastlı ve birbirinden net ayrılan renk paleti
+const SUBJECT_COLOR_PALETTE = [
+  '#FF6B6B', // Canlı kırmızı
+  '#06D6A0', // Mint
+  '#FF914D', // Mandalina
+  '#3A86FF', // Kobalt mavi
+  '#FFD166', // Amber
+  '#8338EC', // Mor
+  '#FFE156', // Sarı
+  '#118AB2', // Gökyüzü mavisi
+  '#8AC926', // Lime
+  '#FF006E', // Fuşya
+  '#1DD3B0', // Turkuaz
+  '#C77DFF', // Lavanta
+  '#2EC4B6', // Camgöbeği
+  '#F15BB5', // Magenta
+  '#577590', // Çelik mavi
+  '#9B5DE5'  // Menekşe
+];
+
+// TYT & AYT ders renklerini eşleştirmek için özel renk haritası
+const SUBJECT_COLOR_OVERRIDES = {
+  'tyt matematik': '#7E57C2',
+  'ayt matematik': '#7E57C2',
+  'tyt fizik': '#F06292',
+  'ayt fizik': '#F06292',
+  'tyt kimya': '#26C6DA',
+  'ayt kimya': '#26C6DA',
+  'tyt biyoloji': '#9CCC65',
+  'ayt biyoloji': '#9CCC65',
+  'tyt geometri': '#F4B400',
+  'ayt geometri': '#F4B400',
+  'tyt türkçe': '#546E7A',
+  'ayt türkçe': '#546E7A',
+  'tyt coğrafya': '#2196F3',
+  'ayt coğrafya': '#2196F3',
+  'tyt tarih': '#FF7043',
+  'ayt tarih': '#FF7043',
+  'tyt din': '#EF5350',
+  'ayt din': '#EF5350',
+  'tyt felsefe': '#00838F',
+  'ayt felsefe': '#00838F',
+  'türkçe': '#546E7A',
+  'matematik': '#7E57C2',
+  'geometri': '#F4B400',
+  'fizik': '#F06292',
+  'kimya': '#26C6DA',
+  'biyoloji': '#9CCC65',
+  'tarih': '#FF7043',
+  'tarih-1': '#FF7043',
+  'tarih-2': '#FF8A65',
+  'coğrafya': '#2196F3',
+  'coğrafya-1': '#2196F3',
+  'coğrafya-2': '#64B5F6',
+  'felsefe': '#00838F',
+  'felsefe grubu': '#00838F',
+  'din kültürü ve ahlak bilgisi': '#8E24AA',
+  'türk dili ve edebiyatı': '#6A1B9A',
+  'psikoloji': '#EC4899',
+  'sosyoloji': '#0EA5E9',
+  'mantık': '#8B5CF6',
+  'fen bilimleri': '#059669',
+  't.c. inkılap tarihi ve atatürkçülük': '#EA580C',
+  'ingilizce': '#2563EB',
+  'vatandaşlık': '#0EA5E9',
+  'gelişim psikolojisi': '#F472B6',
+  'öğrenme psikolojisi': '#A855F7',
+  'rehberlik ve psikolojik danışma': '#7C3AED',
+  'öğretim ilke ve yöntemleri': '#14B8A6',
+  'ölçme ve değerlendirme': '#6366F1',
+  'alan bilgisi': '#9333EA'
+};
+
+const LEGACY_AREA_FALLBACKS = {
+  sayisal: 'yks_say',
+  sozel: 'yks_soz',
+  esit_agirlik: 'yks_ea',
+  dil: 'yks_tyt'
+};
+
+// Alan bazlı ders listeleri
+const getDersListesi = (alan) => {
+  if (!alan) return [];
+  const resolvedArea = LEGACY_AREA_FALLBACKS[alan] || alan;
+  return EXAM_SUBJECTS_BY_AREA[resolvedArea] || [];
+};
+
+// Ders adına göre görsel eşleştirmesi
+const getSubjectIcon = (ders) => {
+  if (!ders) return null;
+  // TYT/AYT/LGS/KPSS gibi önekleri kaldır ve normalize et
+  let normalized = ders.toLowerCase().trim();
+  normalized = normalized.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+  
+  // Türkçe karakterleri normalize et
+  normalized = normalized
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+  
+  // Tarih-1, Tarih-2 gibi varyasyonları düzelt
+  normalized = normalized.replace(/-\d+$/, '');
+  
+  // Matematik
+  if (normalized.includes('matematik')) return tumMatematikImg;
+  
+  // Geometri
+  if (normalized.includes('geometri')) return tumGeometriImg;
+  
+  // Türkçe
+  if (normalized.includes('turkce') || normalized === 'turkce') return tumTurkceImg;
+  
+  // Türk Dili ve Edebiyatı
+  if (normalized.includes('edebiyat') || normalized.includes('turk dili')) return edebiyatImg;
+  
+  // Fizik
+  if (normalized.includes('fizik')) return tumFizikImg;
+  
+  // Kimya
+  if (normalized.includes('kimya')) return tumKimyaImg;
+  
+  // Biyoloji
+  if (normalized.includes('biyoloji')) return tumBiyolojiImg;
+  
+  // Tarih ve İnkılap
+  if (normalized.includes('inkilap') || normalized.includes('inkılap')) return lgsInkilapImg;
+  if (normalized.includes('tarih')) return tarihImg;
+  
+  // Coğrafya
+  if (normalized.includes('cografya') || normalized.includes('coğrafya')) return cografyaImg;
+  
+  // Felsefe
+  if (normalized.includes('felsefe') || normalized.includes('psikoloji') || normalized.includes('sosyoloji') || normalized.includes('mantik') || normalized.includes('mantık')) return felsefeImg;
+  
+  // Din Kültürü
+  if (normalized.includes('din')) return dinImg;
+  
+  // Fen Bilimleri
+  if (normalized.includes('fen bilimleri') || normalized.includes('fen bilim') || normalized === 'fen') return lgsFenImg;
+  
+  // İngilizce
+  if (normalized.includes('ingilizce') || normalized.includes('ingiliz')) return tumIngilizceImg;
+  
+  // Sosyal (genel)
+  if (normalized.includes('sosyal') || normalized.includes('vatandaslik') || normalized.includes('vatandaşlık')) return sosyalImg;
+  
+  return null;
+};
+
+const getEtutDurationStorageKey = (teacherId) =>
+  teacherId ? `etutDuration_${teacherId}` : 'etutDuration_default';
+
+const loadStoredEtutDuration = (teacherId) => {
+  if (typeof window === 'undefined') return 40;
+  const stored = window.localStorage.getItem(getEtutDurationStorageKey(teacherId));
+  const parsed = parseInt(stored, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 40;
+};
+
+const persistEtutDuration = (teacherId, duration) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(getEtutDurationStorageKey(teacherId), String(duration));
+};
+
+const addMinutesToTime = (time, minutes) => {
+  if (!time || !minutes) return '';
+  const [hours, mins] = time.split(':').map((part) => parseInt(part, 10));
+  if (Number.isNaN(hours) || Number.isNaN(mins)) return '';
+  const totalMinutes = hours * 60 + mins + Number(minutes);
+  const normalized = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const endHour = Math.floor(normalized / 60);
+  const endMinute = normalized % 60;
+  return `${endHour.toString().padStart(2, '0')}:${endMinute.toString().padStart(2, '0')}`;
+};
+
+const calculateDurationBetweenTimes = (start, end) => {
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map((v) => parseInt(v, 10));
+  const [eh, em] = end.split(':').map((v) => parseInt(v, 10));
+  if ([sh, sm, eh, em].some((v) => Number.isNaN(v))) return null;
+  const startTotal = sh * 60 + sm;
+  const endTotal = eh * 60 + em;
+  const diff = endTotal - startTotal;
+  return diff > 0 ? diff : null;
+};
+
+const createEmptyRoutineForm = () => ({
+  gunler: [],
+  saat: '',
+  bitisSaati: '',
+  programTipi: 'soru_cozum',
+  ders: '',
+  konu: '',
+  kaynak: '',
+  aciklama: '',
+  soruSayisi: ''
+});
+
+const OgrenciProgramTab = ({ student, teacherId }) => {
+  const [currentWeek, setCurrentWeek] = useState(new Date());
+  const [programs, setPrograms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addingProgramDay, setAddingProgramDay] = useState(null); // Hangi güne program ekleniyor (Date object veya null)
+  const [editingProgram, setEditingProgram] = useState(null);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null); // { id, name, description, programs }
+  const [showTemplateList, setShowTemplateList] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [draggedProgram, setDraggedProgram] = useState(null);
+  const [showRoutineModal, setShowRoutineModal] = useState(false);
+  const [routines, setRoutines] = useState([]);
+  const [routineForm, setRoutineForm] = useState(() => createEmptyRoutineForm());
+  const [routineError, setRoutineError] = useState('');
+  const [routineSaving, setRoutineSaving] = useState(false);
+  const [routineModalMode, setRoutineModalMode] = useState('list');
+  const [editingRoutine, setEditingRoutine] = useState(null);
+  const [teacherAnalysis, setTeacherAnalysis] = useState('');
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [teacherAnalysisSaving, setTeacherAnalysisSaving] = useState(false);
+  const [teacherAnalysisMessage, setTeacherAnalysisMessage] = useState('');
+  const [teacherAnalysisMessageType, setTeacherAnalysisMessageType] = useState('success');
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [exportImportMessage, setExportImportMessage] = useState('');
+  const [exportImportMessageType, setExportImportMessageType] = useState('success');
+  const [expandedAciklama, setExpandedAciklama] = useState(new Set());
+  const [calendarScale, setCalendarScale] = useState(1);
+  const [defaultEtutDuration, setDefaultEtutDuration] = useState(() => loadStoredEtutDuration(teacherId));
+  const [clearingWeek, setClearingWeek] = useState(false);
+  const [openStatusDropdown, setOpenStatusDropdown] = useState(null);
+  const [showTopicAnalysisModal, setShowTopicAnalysisModal] = useState(false);
+  const [topicAnalysisDateFilter, setTopicAnalysisDateFilter] = useState('3_ay');
+  const [topicAnalysisDateRange, setTopicAnalysisDateRange] = useState({ start: null, end: null });
+  const [topicAnalysisSubject, setTopicAnalysisSubject] = useState('');
+  const [programForm, setProgramForm] = useState({
+    programTipi: 'soru_cozum',
+    ders: '',
+    konu: '',
+    kaynak: '',
+    aciklama: '',
+    soruSayisi: '',
+    baslangicSaati: '',
+    bitisSaati: '',
+    etutSuresi: loadStoredEtutDuration(teacherId)
+  });
+
+  const subjectColorMapRef = useRef({});
+  const subjectColorIndexRef = useRef(0);
+  const teacherAnalysisRef = useRef(null);
+  const aiAnalysisRef = useRef(null);
+  const exportMenuRef = useRef(null);
+  const exportButtonRef = useRef(null);
+  const importFileInputRef = useRef(null);
+  const addProgramFormRef = useRef(null);
+  const addFormEndTimeInputRef = useRef(null);
+  const editFormEndTimeInputRef = useRef(null);
+  const editProgramFormRef = useRef(null);
+  const topicAnalysisModalRef = useRef(null);
+  const topicAnalysisModalHeaderRef = useRef(null);
+  const topicAnalysisModalResizeRef = useRef(null);
+
+  const getSubjectColor = (ders) => {
+    if (!ders) return null;
+    const key = ders.toLowerCase();
+
+    if (SUBJECT_COLOR_OVERRIDES[key]) {
+      return SUBJECT_COLOR_OVERRIDES[key];
+    }
+
+    if (!subjectColorMapRef.current[key]) {
+      const paletteIndex = subjectColorIndexRef.current % SUBJECT_COLOR_PALETTE.length;
+      subjectColorMapRef.current[key] = SUBJECT_COLOR_PALETTE[paletteIndex];
+      subjectColorIndexRef.current += 1;
+    }
+    return subjectColorMapRef.current[key];
+  };
+
+  useEffect(() => {
+    subjectColorMapRef.current = {};
+    subjectColorIndexRef.current = 0;
+  }, [student?.id]);
+
+  useEffect(() => {
+    const handleDocumentClick = () => setOpenStatusDropdown(null);
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, []);
+
+  useEffect(() => {
+    setOpenStatusDropdown(null);
+  }, [programs]);
+
+  useEffect(() => {
+    setDefaultEtutDuration(loadStoredEtutDuration(teacherId));
+  }, [teacherId]);
+
+  useEffect(() => {
+    if (!addingProgramDay && !editingProgram) {
+      setProgramForm((prev) => ({
+        ...prev,
+        etutSuresi: defaultEtutDuration
+      }));
+    }
+  }, [defaultEtutDuration, addingProgramDay, editingProgram]);
+
+  const dersOptions = useMemo(() => getDersListesi(student?.alan), [student?.alan]);
+
+  // Öğrencinin derslerini programs verisinden çıkar
+  const studentSubjects = useMemo(() => {
+    const subjectsSet = new Set();
+    programs.forEach(prog => {
+      if (prog.ders && prog.ders.trim()) {
+        subjectsSet.add(prog.ders.trim());
+      }
+    });
+    return Array.from(subjectsSet).sort();
+  }, [programs]);
+
+  // Öğrencinin konularını programs verisinden çıkar (seçili derse göre filtrele)
+  const studentTopics = useMemo(() => {
+    const topicsSet = new Set();
+    programs.forEach(prog => {
+      // Eğer ders seçilmişse, sadece o derse ait konuları göster
+      if (topicAnalysisSubject && prog.ders !== topicAnalysisSubject) return;
+      if (prog.konu && prog.konu.trim()) {
+        topicsSet.add(prog.konu.trim());
+      }
+    });
+    return Array.from(topicsSet).sort();
+  }, [programs, topicAnalysisSubject]);
+
+  // Modal açıldığında ilk dersi otomatik seç
+  useEffect(() => {
+    if (showTopicAnalysisModal && studentSubjects.length > 0 && !topicAnalysisSubject) {
+      setTopicAnalysisSubject(studentSubjects[0]);
+    }
+  }, [showTopicAnalysisModal, studentSubjects, topicAnalysisSubject]);
+
+  // Haftanın günlerini hesapla (Pazartesi'den başlayarak)
+  const weekDays = useMemo(() => {
+    const startOfWeek = new Date(currentWeek);
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Pazartesi'ye ayarla
+    startOfWeek.setDate(diff);
+    
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      days.push(date);
+    }
+    return days;
+  }, [currentWeek]);
+
+  const weekStartIso = useMemo(() => {
+    if (!weekDays.length) return null;
+    return weekDays[0].toISOString().split('T')[0];
+  }, [weekDays]);
+
+  const firstPrintDays = weekDays.slice(0, 4);
+  const secondPrintDays = weekDays.slice(4);
+
+  // Öğrenci programını yükle
+  useEffect(() => {
+    if (student?.id) {
+      fetchStudentProgram();
+    }
+  }, [student?.id, currentWeek]);
+
+  // Şablonları yükle
+  useEffect(() => {
+    if (teacherId) {
+      fetchTemplates();
+    }
+  }, [teacherId]);
+
+  useEffect(() => {
+    if (student?.id) {
+      fetchStudentRoutines();
+    } else {
+      setRoutines([]);
+    }
+  }, [student?.id]);
+
+  const fetchStudentProgram = async () => {
+    setLoading(true);
+    try {
+      const startDate = weekDays[0].toISOString().split('T')[0];
+      const endDate = weekDays[6].toISOString().split('T')[0];
+      
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDate}&endDate=${endDate}`
+      );
+      const data = await response.json();
+      
+      if (data.success && data.programs) {
+        setPrograms(data.programs);
+      }
+    } catch (error) {
+      console.error('Program yüklenemedi:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStudentRoutines = async () => {
+    if (!student?.id) return;
+    try {
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_routines.php?studentId=${student.id}`
+      );
+      const data = await response.json();
+      if (data.success && Array.isArray(data.routines)) {
+        const normalized = data.routines.map((routine) => {
+          const days = Array.isArray(routine.gunler)
+            ? routine.gunler.map((d) => parseInt(d, 10)).filter((d) => d >= 1 && d <= 7)
+            : [];
+          const startTime = routine.baslangic_saati || routine.saat || '';
+          const endTime = routine.bitis_saati || routine.bitisSaati || '';
+          return {
+            id: routine.id,
+            gunler: days.sort((a, b) => a - b),
+            saat: startTime ? startTime.substring(0, 5) : '',
+            baslangicSaati: startTime,
+            bitisSaati: endTime ? endTime.substring(0, 5) : '',
+            bitis_saati: endTime,
+            programTipi: routine.program_tipi || routine.programTipi || 'soru_cozum',
+            ders: routine.ders || '',
+            konu: routine.konu || '',
+            kaynak: routine.kaynak || '',
+            aciklama: routine.aciklama || '',
+            soruSayisi: routine.soru_sayisi ?? routine.soruSayisi ?? null,
+            aktif: routine.aktif !== undefined ? Number(routine.aktif) : 1
+          };
+        });
+        setRoutines(normalized);
+      }
+    } catch (error) {
+      console.error('Rutinler yüklenemedi:', error);
+    }
+  };
+
+  const fetchTeacherAnalysis = useCallback(async () => {
+    if (!student?.id || !teacherId || !weekStartIso) {
+      setTeacherAnalysis('');
+      setAiAnalysis('');
+      return;
+    }
+
+    setAnalysisLoading(true);
+    setTeacherAnalysisMessageType('success');
+    try {
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_analysis.php?studentId=${student.id}&teacherId=${teacherId}&weekStart=${weekStartIso}`
+      );
+      if (!response.ok) {
+        setTeacherAnalysis('');
+        setAiAnalysis('');
+        return;
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        setTeacherAnalysis(data.teacherComment || '');
+        setAiAnalysis(data.aiComment || '');
+      } else {
+        setTeacherAnalysis('');
+        setAiAnalysis('');
+      }
+    } catch (error) {
+      console.error('Analiz yorumları yüklenemedi:', error);
+      setTeacherAnalysis('');
+      setAiAnalysis('');
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }, [student?.id, teacherId, weekStartIso]);
+
+  useEffect(() => {
+    setTeacherAnalysisMessage('');
+    setTeacherAnalysisMessageType('success');
+    fetchTeacherAnalysis();
+  }, [fetchTeacherAnalysis]);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClickOutside = (event) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(event.target) &&
+        exportButtonRef.current &&
+        !exportButtonRef.current.contains(event.target)
+      ) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportMenu]);
+
+  useEffect(() => {
+    if (!exportImportMessage) return;
+    const timer = setTimeout(() => {
+      setExportImportMessage('');
+      setExportImportMessageType('success');
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [exportImportMessage]);
+
+  const fetchTemplates = async () => {
+    try {
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_program_templates.php?teacherId=${teacherId}`
+      );
+      const data = await response.json();
+      
+      if (data.success && data.templates) {
+        setTemplates(data.templates);
+      }
+    } catch (error) {
+      console.error('Şablonlar yüklenemedi:', error);
+    }
+  };
+
+  const handlePrevWeek = () => {
+    const newWeek = new Date(currentWeek);
+    newWeek.setDate(newWeek.getDate() - 7);
+    setCurrentWeek(newWeek);
+  };
+
+  const handleNextWeek = () => {
+    const newWeek = new Date(currentWeek);
+    newWeek.setDate(newWeek.getDate() + 7);
+    setCurrentWeek(newWeek);
+  };
+
+  const handleToday = () => {
+    setCurrentWeek(new Date());
+  };
+
+  const toggleAciklama = (programId) => {
+    setExpandedAciklama(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(programId)) {
+        newSet.delete(programId);
+      } else {
+        newSet.add(programId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleZoomIn = () => {
+    setCalendarScale(prev => Math.min(1.4, Number((prev + 0.1).toFixed(2))));
+  };
+
+  const handleZoomOut = () => {
+    setCalendarScale(prev => Math.max(0.5, Number((prev - 0.1).toFixed(2))));
+  };
+
+  const handleAddProgramClick = (day) => {
+    setAddingProgramDay(day);
+    setProgramForm({
+      programTipi: 'soru_cozum',
+      ders: '',
+      konu: '',
+      kaynak: '',
+      aciklama: '',
+      soruSayisi: '',
+      baslangicSaati: '',
+      bitisSaati: '',
+      etutSuresi: defaultEtutDuration
+    });
+  };
+
+  useEffect(() => {
+    if (addingProgramDay && addProgramFormRef.current) {
+      addProgramFormRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+  }, [addingProgramDay]);
+
+  useEffect(() => {
+    if (editingProgram && editProgramFormRef.current) {
+      editProgramFormRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+  }, [editingProgram]);
+
+  const handleCancelAddProgram = () => {
+    setAddingProgramDay(null);
+    setProgramForm({
+      programTipi: 'soru_cozum',
+      ders: '',
+      konu: '',
+      kaynak: '',
+      aciklama: '',
+      soruSayisi: '',
+      baslangicSaati: '',
+      bitisSaati: '',
+      etutSuresi: defaultEtutDuration
+    });
+  };
+
+  const handleEtutDurationChange = (value, { persistDefault = true } = {}) => {
+    const parsed = parseInt(value, 10);
+    setProgramForm((prev) => {
+      const durationValue = Number.isFinite(parsed) && parsed > 0 ? parsed : '';
+      const updated = {
+        ...prev,
+        etutSuresi: durationValue
+      };
+      if (prev.baslangicSaati && durationValue) {
+        updated.bitisSaati = addMinutesToTime(prev.baslangicSaati, durationValue);
+      }
+      return updated;
+    });
+    if (persistDefault && Number.isFinite(parsed) && parsed > 0) {
+      setDefaultEtutDuration(parsed);
+      persistEtutDuration(teacherId, parsed);
+    }
+  };
+
+  const handleStartTimeChange = (value) => {
+    setProgramForm((prev) => {
+      const updated = {
+        ...prev,
+        baslangicSaati: value
+      };
+      if (value && prev.etutSuresi) {
+        updated.bitisSaati = addMinutesToTime(value, prev.etutSuresi);
+      } else if (!value) {
+        updated.bitisSaati = '';
+      }
+      return updated;
+    });
+  };
+
+  const handleStartTimeBlur = (targetRef) => {
+    if (targetRef?.current && programForm.baslangicSaati && programForm.baslangicSaati.length === 5) {
+      targetRef.current.focus();
+    }
+  };
+
+  const handleProgramSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!addingProgramDay) return;
+
+    try {
+      const programData = {
+        studentId: student.id,
+        teacherId: teacherId,
+        tarih: addingProgramDay.toISOString().split('T')[0],
+        programTipi: programForm.programTipi,
+        ders: programForm.ders,
+        konu: programForm.konu || null,
+        kaynak: programForm.kaynak || null,
+        aciklama: programForm.aciklama || null,
+        soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
+        baslangicSaati: programForm.baslangicSaati,
+        bitisSaati: programForm.bitisSaati
+      };
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/save_student_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(programData)
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        handleCancelAddProgram();
+        fetchStudentProgram();
+      } else {
+        alert(data.message || 'Program kaydedilemedi');
+      }
+    } catch (error) {
+      console.error('Program kaydedilemedi:', error);
+      alert('Program kaydedilemedi');
+    }
+  };
+
+  const handleDeleteProgram = async (
+    programId,
+    isRoutineInstance = false,
+    targetDate = null,
+    routineId = null,
+    studentId = null
+  ) => {
+    const confirmMessage = isRoutineInstance
+      ? 'Bu rutin görev sadece bu haftadan kaldırılacak. Devam etmek istiyor musunuz?'
+      : 'Bu programı silmek istediğinize emin misiniz?';
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_student_program.php`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(
+            isRoutineInstance && targetDate && routineId && studentId
+              ? {
+                  programId,
+                  isRoutineInstance: true,
+                  targetDate,
+                  routineId,
+                  ogrenciId: studentId
+                }
+              : { programId }
+          )
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        fetchStudentProgram();
+      } else {
+        alert(data.message || 'Program silinemedi');
+      }
+    } catch (error) {
+      console.error('Program silinemedi:', error);
+      alert('Program silinemedi');
+    }
+  };
+
+  const handleEditProgram = (program) => {
+    if (program?.is_routine) {
+      alert('Rutin görevler program üzerinden düzenlenemez. Rutin listesi üzerinden güncelleyin.');
+      return;
+    }
+    setEditingProgram(program);
+    const startTime = (program.baslangic_saati || '').substring(0, 5);
+    const endTime = (program.bitis_saati || '').substring(0, 5);
+    const programDuration = calculateDurationBetweenTimes(startTime, endTime) || defaultEtutDuration;
+    setProgramForm({
+      programTipi: program.program_tipi,
+      ders: program.ders,
+      konu: program.konu || '',
+      kaynak: program.kaynak || '',
+      aciklama: program.aciklama || '',
+      soruSayisi: program.soru_sayisi || '',
+      baslangicSaati: startTime,
+      bitisSaati: endTime,
+      etutSuresi: programDuration
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingProgram(null);
+    setProgramForm({
+      programTipi: 'soru_cozum',
+      ders: '',
+      konu: '',
+      kaynak: '',
+      aciklama: '',
+      soruSayisi: '',
+      baslangicSaati: '',
+      bitisSaati: '',
+      etutSuresi: defaultEtutDuration
+    });
+  };
+
+  const handleStatusUpdate = async (program, newStatus) => {
+    if (!program?.id || !student?.id) return;
+
+    const payload = {
+      programId: program.id,
+      status: newStatus
+    };
+
+    if (program.is_routine) {
+      payload.isRoutineInstance = true;
+      payload.targetDate = program.tarih;
+      payload.routineId = program.routine_id;
+      payload.ogrenciId = program.ogrenci_id;
+    }
+
+    try {
+      const response = await fetch('https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student_program_status.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        fetchStudentProgram();
+        setOpenStatusDropdown(null);
+      } else {
+        alert(data.message || 'Durum güncellenemedi');
+      }
+    } catch (error) {
+      console.error('Durum güncellenemedi:', error);
+      alert('Durum güncellenemedi');
+    }
+  };
+
+  const handleClearWeekProgram = async () => {
+    if (!programs.length) {
+      alert('Silinecek haftalık program bulunamadı.');
+      return;
+    }
+
+    if (!window.confirm('Bu haftadaki tüm programları silmek istediğinize emin misiniz?')) {
+      return;
+    }
+
+    setClearingWeek(true);
+    try {
+      await Promise.all(
+        programs.map((prog) => {
+          const isRoutine = !!prog.is_routine;
+          const payload = isRoutine && prog.routine_id && prog.tarih && prog.ogrenci_id
+            ? {
+                programId: prog.id,
+                isRoutineInstance: true,
+                targetDate: prog.tarih,
+                routineId: prog.routine_id,
+                ogrenciId: prog.ogrenci_id
+              }
+            : { programId: prog.id };
+          
+          return fetch(`https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_student_program.php`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+        })
+      );
+      fetchStudentProgram();
+    } catch (error) {
+      console.error('Programlar silinemedi:', error);
+      alert('Programlar silinemedi');
+    } finally {
+      setClearingWeek(false);
+    }
+  };
+
+  const handleUpdateProgram = async (e) => {
+    e.preventDefault();
+    
+    if (!editingProgram) return;
+
+    try {
+      const programData = {
+        programId: editingProgram.id,
+        tarih: editingProgram.tarih,
+        programTipi: programForm.programTipi,
+        ders: programForm.ders,
+        konu: programForm.konu || null,
+        kaynak: programForm.kaynak || null,
+        aciklama: programForm.aciklama ? programForm.aciklama.trim() : null,
+        soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
+        baslangicSaati: programForm.baslangicSaati,
+        bitisSaati: programForm.bitisSaati
+      };
+
+      console.log('Güncellenecek program verisi:', programData);
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(programData)
+        }
+      );
+
+      const data = await response.json();
+      
+      console.log('API yanıtı:', data);
+      
+      if (data.success) {
+        handleCancelEdit();
+        fetchStudentProgram();
+      } else {
+        console.error('Güncelleme hatası:', data.message);
+        alert(data.message || 'Program güncellenemedi');
+      }
+    } catch (error) {
+      console.error('Program güncellenemedi:', error);
+      alert('Program güncellenemedi');
+    }
+  };
+
+  const handleCopyProgram = async (program) => {
+    try {
+      const programData = {
+        studentId: student.id,
+        teacherId: teacherId,
+        tarih: program.tarih,
+        programTipi: program.program_tipi,
+        ders: program.ders,
+        konu: program.konu || null,
+        soruSayisi: program.soru_sayisi || null,
+        baslangicSaati: program.baslangic_saati,
+        bitisSaati: program.bitis_saati
+      };
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/save_student_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(programData)
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        fetchStudentProgram();
+      } else {
+        alert(data.message || 'Program kopyalanamadı');
+      }
+    } catch (error) {
+      console.error('Program kopyalanamadı:', error);
+      alert('Program kopyalanamadı');
+    }
+  };
+
+  const formatRoutineDays = (days = []) => {
+    if (!days.length) return 'Gün seçilmedi';
+    return days
+      .slice()
+      .sort((a, b) => a - b)
+      .map((day) => DAY_LABELS_SHORT[day] || day)
+      .join(', ');
+  };
+
+  const openRoutineModal = () => {
+    setRoutineForm(createEmptyRoutineForm());
+    setRoutineError('');
+    setRoutineModalMode('list');
+    setEditingRoutine(null);
+    setShowRoutineModal(true);
+  };
+
+  const closeRoutineModal = () => {
+    setShowRoutineModal(false);
+    setRoutineError('');
+    setRoutineModalMode('list');
+    setEditingRoutine(null);
+    setRoutineForm(createEmptyRoutineForm());
+  };
+
+  const startRoutineCreation = () => {
+    setRoutineForm(createEmptyRoutineForm());
+    setRoutineError('');
+    setEditingRoutine(null);
+    setRoutineModalMode('form');
+  };
+
+  const startRoutineEdit = (routine) => {
+    if (!routine) return;
+    setEditingRoutine(routine);
+    setRoutineForm({
+      gunler: routine.gunler || [],
+      saat: (routine.saat || routine.baslangic_saati || '').substring(0, 5),
+      bitisSaati: (routine.bitisSaati || routine.bitis_saati || '').substring(0, 5),
+      programTipi: routine.programTipi || routine.program_tipi || 'soru_cozum',
+      ders: routine.ders || '',
+      konu: routine.konu || '',
+      kaynak: routine.kaynak || '',
+      aciklama: routine.aciklama || '',
+      soruSayisi: routine.soruSayisi || routine.soru_sayisi ? String(routine.soruSayisi || routine.soru_sayisi) : ''
+    });
+    setRoutineError('');
+    setRoutineModalMode('form');
+  };
+
+  const returnToRoutineList = () => {
+    setRoutineModalMode('list');
+    setEditingRoutine(null);
+    setRoutineError('');
+    setRoutineForm(createEmptyRoutineForm());
+  };
+
+  const handleRoutineDayToggle = (dayValue) => {
+    setRoutineForm((prev) => {
+      const exists = prev.gunler.includes(dayValue);
+      const updated = exists
+        ? prev.gunler.filter((day) => day !== dayValue)
+        : [...prev.gunler, dayValue];
+      return {
+        ...prev,
+        gunler: updated.sort((a, b) => a - b)
+      };
+    });
+  };
+
+  const handleRoutineFormChange = (e) => {
+    const { name, value } = e.target;
+    setRoutineForm((prev) => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleRoutineSubmit = async (e) => {
+    e.preventDefault();
+    if (!student?.id || !teacherId) {
+      setRoutineError('Öğrenci veya öğretmen bilgisi bulunamadı.');
+      return;
+    }
+
+    if (!routineForm.gunler.length) {
+      setRoutineError('En az bir gün seçmelisiniz.');
+      return;
+    }
+
+    if (!routineForm.saat) {
+      setRoutineError('Başlangıç saati seçmelisiniz.');
+      return;
+    }
+
+    if (!routineForm.bitisSaati) {
+      setRoutineError('Bitiş saati seçmelisiniz.');
+      return;
+    }
+
+    const routineDuration = calculateDurationBetweenTimes(routineForm.saat, routineForm.bitisSaati);
+    if (!routineDuration) {
+      setRoutineError('Bitiş saati başlangıç saatinden sonra olmalı.');
+      return;
+    }
+
+    if (!routineForm.ders) {
+      setRoutineError('Bir ders seçmelisiniz.');
+      return;
+    }
+
+    setRoutineSaving(true);
+    setRoutineError('');
+
+    try {
+      const payload = {
+        studentId: student.id,
+        teacherId,
+        gunler: routineForm.gunler,
+        baslangicSaati: routineForm.saat,
+        bitisSaati: routineForm.bitisSaati,
+        programTipi: routineForm.programTipi,
+        ders: routineForm.ders,
+        konu: routineForm.konu || null,
+        kaynak: routineForm.kaynak || null,
+        aciklama: routineForm.aciklama || null,
+        soruSayisi: routineForm.soruSayisi ? parseInt(routineForm.soruSayisi, 10) : null
+      };
+
+      let endpoint = 'https://vedatdaglarmuhendislik.com.tr/php-backend/api/create_student_routine.php';
+
+      if (editingRoutine?.id) {
+        endpoint = 'https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student_routine.php';
+        payload.routineId = editingRoutine.id;
+      }
+
+      const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await fetchStudentRoutines();
+        await fetchStudentProgram();
+        setRoutineForm(createEmptyRoutineForm());
+        setEditingRoutine(null);
+        setRoutineModalMode('list');
+        setRoutineError('');
+      } else {
+        setRoutineError(data.message || 'Rutin kaydedilemedi.');
+      }
+    } catch (error) {
+      console.error('Rutin kaydedilemedi:', error);
+      setRoutineError('Rutin kaydedilemedi.');
+    } finally {
+      setRoutineSaving(false);
+    }
+  };
+
+  const handleDeleteRoutine = async (routineId) => {
+    if (!window.confirm('Bu rutini silmek istediğinize emin misiniz?')) return;
+    try {
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_student_routine.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ routineId })
+        }
+      );
+      const data = await response.json();
+      if (data.success) {
+        fetchStudentRoutines();
+        fetchStudentProgram();
+        if (editingRoutine?.id === routineId) {
+          returnToRoutineList();
+          setRoutineForm(createEmptyRoutineForm());
+        }
+        setRoutineError('');
+      } else {
+        const message = data.message || 'Rutin silinemedi.';
+        if (showRoutineModal) {
+          setRoutineError(message);
+        } else {
+          alert(message);
+        }
+      }
+    } catch (error) {
+      console.error('Rutin silinemedi:', error);
+      if (showRoutineModal) {
+        setRoutineError('Rutin silinemedi.');
+      } else {
+      alert('Rutin silinemedi.');
+      }
+    }
+  };
+
+  const handleDragStart = (e, program) => {
+    setDraggedProgram(program);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = async (e, targetDay) => {
+    e.preventDefault();
+    
+    if (!draggedProgram) return;
+
+    const targetDate = targetDay.toISOString().split('T')[0];
+    
+    // Eğer aynı güne bırakılıyorsa, sadece tarihi güncelle
+    if (draggedProgram.tarih === targetDate) {
+      setDraggedProgram(null);
+      return;
+    }
+
+    try {
+      const programData = {
+        programId: draggedProgram.id,
+        tarih: targetDate,
+        programTipi: draggedProgram.program_tipi,
+        ders: draggedProgram.ders,
+        konu: draggedProgram.konu || null,
+        soruSayisi: draggedProgram.soru_sayisi || null,
+        baslangicSaati: draggedProgram.baslangic_saati,
+        bitisSaati: draggedProgram.bitis_saati
+      };
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(programData)
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        fetchStudentProgram();
+      } else {
+        alert(data.message || 'Program taşınamadı');
+      }
+    } catch (error) {
+      console.error('Program taşınamadı:', error);
+      alert('Program taşınamadı');
+    }
+    
+    setDraggedProgram(null);
+  };
+
+  const handleApplyTemplate = async (templateId) => {
+    if (!window.confirm('Bu şablonu öğrenciye uygulamak istediğinize emin misiniz? Mevcut programlar korunacak.')) return;
+
+    try {
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/apply_template_to_student.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            templateId,
+            studentId: student.id,
+            teacherId: teacherId,
+            startDate: weekDays[0].toISOString().split('T')[0]
+          })
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setShowTemplateList(false);
+        await fetchStudentProgram();
+        await fetchStudentRoutines();
+        alert('Şablon başarıyla uygulandı');
+      } else {
+        alert(data.message || 'Şablon uygulanamadı');
+      }
+    } catch (error) {
+      console.error('Şablon uygulanamadı:', error);
+      alert('Şablon uygulanamadı');
+    }
+  };
+
+  const handleSaveCurrentProgramAsTemplate = async () => {
+    const templateName = prompt('Şablon adını girin:');
+    if (!templateName || !templateName.trim()) {
+      return;
+    }
+
+    const templateDescription = prompt('Şablon açıklaması (isteğe bağlı):') || '';
+
+    try {
+      const startDate = weekDays[0].toISOString().split('T')[0];
+      const endDate = weekDays[6].toISOString().split('T')[0];
+      
+      // Normal programları filtrele (rutin olmayanlar)
+      const currentPrograms = programs.filter(p => 
+        p.tarih >= startDate && p.tarih <= endDate && !p.is_routine
+      );
+
+      // Aktif rutin görevleri al
+      const activeRoutines = routines.filter(r => r.aktif === 1 || r.aktif === true);
+
+      if (currentPrograms.length === 0 && activeRoutines.length === 0) {
+        alert('Kaydedilecek program veya rutin görev bulunamadı.');
+        return;
+      }
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/save_current_program_as_template.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            teacherId: teacherId,
+            templateName: templateName.trim(),
+            templateDescription: templateDescription.trim(),
+            programs: currentPrograms.map(prog => ({
+              gunNo: weekDays.findIndex(d => d.toISOString().split('T')[0] === prog.tarih) + 1,
+              programTipi: prog.program_tipi,
+              ders: prog.ders,
+              konu: prog.konu || null,
+              kaynak: prog.kaynak || null,
+              aciklama: prog.aciklama || null,
+              soruSayisi: prog.soru_sayisi || null,
+              baslangicSaati: prog.baslangic_saati,
+              bitisSaati: prog.bitis_saati
+            })),
+            routines: activeRoutines.map(routine => ({
+              gunler: routine.gunler || [],
+              baslangicSaati: routine.baslangic_saati || routine.saat || null,
+              bitisSaati: routine.bitis_saati || routine.bitisSaati || null,
+              programTipi: routine.program_tipi || routine.programTipi,
+              ders: routine.ders,
+              konu: routine.konu || null,
+              kaynak: routine.kaynak || null,
+              aciklama: routine.aciklama || null,
+              soruSayisi: routine.soru_sayisi || routine.soruSayisi || null
+            }))
+          })
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setShowTemplateList(false);
+        fetchTemplates();
+        alert('Mevcut program şablon olarak kaydedildi');
+      } else {
+        alert(data.message || 'Şablon kaydedilemedi');
+      }
+    } catch (error) {
+      console.error('Şablon kaydedilemedi:', error);
+      alert('Şablon kaydedilemedi');
+    }
+  };
+
+  const handleLoadPreviousWeekProgram = async () => {
+    if (!window.confirm('Geçen haftanın programını bu haftaya kopyalamak istediğinize emin misiniz? Mevcut programlar korunacak.')) {
+      return;
+    }
+
+    try {
+      const previousWeekStart = new Date(weekDays[0]);
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+      const previousWeekEnd = new Date(previousWeekStart);
+      previousWeekEnd.setDate(previousWeekEnd.getDate() + 6);
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/copy_previous_week_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            studentId: student.id,
+            teacherId: teacherId,
+            previousWeekStart: previousWeekStart.toISOString().split('T')[0],
+            previousWeekEnd: previousWeekEnd.toISOString().split('T')[0],
+            currentWeekStart: weekDays[0].toISOString().split('T')[0]
+          })
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setShowTemplateList(false);
+        fetchStudentProgram();
+        alert('Geçen haftanın programı bu haftaya kopyalandı');
+      } else {
+        alert(data.message || 'Program kopyalanamadı');
+      }
+    } catch (error) {
+      console.error('Program kopyalanamadı:', error);
+      alert('Program kopyalanamadı');
+    }
+  };
+
+  const handleSaveTeacherAnalysis = async () => {
+    if (!student?.id || !teacherId || !weekStartIso) return;
+
+    setTeacherAnalysisSaving(true);
+    setTeacherAnalysisMessage('');
+    setTeacherAnalysisMessageType('success');
+
+    try {
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/save_student_analysis.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            studentId: student.id,
+            teacherId,
+            weekStart: weekStartIso,
+            teacherComment: teacherAnalysis
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        setTeacherAnalysisMessage('Yorum kaydedildi.');
+        setTeacherAnalysisMessageType('success');
+        await fetchTeacherAnalysis();
+      } else {
+        setTeacherAnalysisMessage(data.message || 'Yorum kaydedilemedi.');
+        setTeacherAnalysisMessageType('error');
+      }
+    } catch (error) {
+      console.error('Öğretmen analizi kaydedilemedi:', error);
+      setTeacherAnalysisMessage('Yorum kaydedilemedi.');
+      setTeacherAnalysisMessageType('error');
+    } finally {
+      setTeacherAnalysisSaving(false);
+      setTimeout(() => {
+        setTeacherAnalysisMessage('');
+        setTeacherAnalysisMessageType('success');
+      }, 4000);
+    }
+  };
+
+  const handleOpenAiAnalysis = () => {
+    if (!student) return;
+
+    // Öğrenciyi benzersiz tanımlamak için id / _id / email / name sırasıyla kullan
+    const key =
+      student.id ||
+      student._id ||
+      student.email ||
+      student.name ||
+      (student.firstName && student.lastName
+        ? `${student.firstName}_${student.lastName}`
+        : 'unknown');
+
+    // Bu haftanın başarı yüzdesini hesapla
+    const thisWeekStart = new Date(currentWeek);
+    const day = thisWeekStart.getDay();
+    const diff = thisWeekStart.getDate() - day + (day === 0 ? -6 : 1); // Pazartesi
+    thisWeekStart.setDate(diff);
+    thisWeekStart.setHours(0, 0, 0, 0);
+
+    const thisWeekEnd = new Date(thisWeekStart);
+    thisWeekEnd.setDate(thisWeekStart.getDate() + 6);
+    thisWeekEnd.setHours(23, 59, 59, 999);
+
+    let total = 0;
+    let completed = 0;
+    let partial = 0;
+
+    programs.forEach((prog) => {
+      if (!prog.tarih) return;
+      const d = new Date(prog.tarih);
+      if (Number.isNaN(d.getTime())) return;
+      if (d < thisWeekStart || d > thisWeekEnd) return;
+
+      total += 1;
+      const status = prog.durum || prog.status || 'yapilmadi';
+      if (status === 'yapildi') completed += 1;
+      else if (status === 'eksik_yapildi') partial += 1;
+    });
+
+    let weeklyGoal = 0;
+    if (total > 0) {
+      const score = (completed + partial * 0.5) / total;
+      weeklyGoal = Math.round(score * 100);
+    }
+
+    const aiStudent = {
+      ...student,
+      weeklyGoal
+    };
+
+    try {
+      localStorage.setItem(`student_ai_${key}`, JSON.stringify(aiStudent));
+    } catch (e) {
+      // localStorage hatasını sessizce yut
+    }
+
+    // Yeni sekmede AI panelini aç
+    window.open(`/ogrenci-ai/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleOpenTeacherAnalysis = () => {
+    setShowTopicAnalysisModal(true);
+  };
+
+  // Draggable modal için
+  useEffect(() => {
+    if (!showTopicAnalysisModal || !topicAnalysisModalRef.current || !topicAnalysisModalHeaderRef.current) return;
+
+    const modal = topicAnalysisModalRef.current;
+    const header = topicAnalysisModalHeaderRef.current;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let initialX = 0;
+    let initialY = 0;
+
+    const handleMouseDown = (e) => {
+      // İlk sürüklemede merkezden konumlanan transform'u kaldır
+      if (modal.style.transform) {
+        const rect = modal.getBoundingClientRect();
+        modal.style.transform = 'none';
+        modal.style.left = `${rect.left}px`;
+        modal.style.top = `${rect.top}px`;
+      }
+
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = modal.getBoundingClientRect();
+      initialX = rect.left;
+      initialY = rect.top;
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    };
+
+    const handleMouseMove = (e) => {
+      if (!isDragging) return;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      modal.style.left = `${initialX + deltaX}px`;
+      modal.style.top = `${initialY + deltaY}px`;
+      modal.style.right = 'auto';
+      modal.style.bottom = 'auto';
+    };
+
+    const handleMouseUp = () => {
+      isDragging = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    header.addEventListener('mousedown', handleMouseDown);
+
+    return () => {
+      header.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [showTopicAnalysisModal]);
+
+  // Resizable modal için
+  useEffect(() => {
+    if (!showTopicAnalysisModal || !topicAnalysisModalRef.current || !topicAnalysisModalResizeRef.current) return;
+
+    const modal = topicAnalysisModalRef.current;
+    const resizeHandle = topicAnalysisModalResizeRef.current;
+    let isResizing = false;
+    let startX = 0;
+    let startY = 0;
+    let startWidth = 0;
+    let startHeight = 0;
+
+    const handleMouseDown = (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startWidth = parseInt(window.getComputedStyle(modal).width, 10);
+      startHeight = parseInt(window.getComputedStyle(modal).height, 10);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      e.preventDefault();
+    };
+
+    const handleMouseMove = (e) => {
+      if (!isResizing) return;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      const newWidth = Math.max(600, startWidth + deltaX);
+      const newHeight = Math.max(400, startHeight + deltaY);
+      modal.style.width = `${newWidth}px`;
+      modal.style.height = `${newHeight}px`;
+    };
+
+    const handleMouseUp = () => {
+      isResizing = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    resizeHandle.addEventListener('mousedown', handleMouseDown);
+
+    return () => {
+      resizeHandle.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+  };
+  }, [showTopicAnalysisModal]);
+
+  const handleToggleExportMenu = () => {
+    setShowExportMenu((prev) => !prev);
+  };
+
+  const handleExportProgram = async () => {
+    if (!student?.id || !teacherId || weekDays.length < 1) {
+      setExportImportMessageType('error');
+      setExportImportMessage('Öğrenci veya hafta bilgisi bulunamadı.');
+      return;
+    }
+
+    const startDate = weekDays[0].toISOString().split('T')[0];
+    const endDate = weekDays[weekDays.length - 1].toISOString().split('T')[0];
+
+    setExportLoading(true);
+    setExportImportMessage('');
+
+    try {
+      const response = await fetch(
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/export_student_program.php?studentId=${student.id}&teacherId=${teacherId}&startDate=${startDate}&endDate=${endDate}`
+      );
+
+      if (!response.ok) {
+        let message = 'Program dışa aktarılamadı.';
+        try {
+          const errorData = await response.json();
+          message = errorData.message || message;
+        } catch (jsonError) {
+          const text = await response.text();
+          if (text) message = text;
+        }
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeStudentId = student.id.slice(0, 8);
+      link.href = downloadUrl;
+      link.download = `ogrenci_program_${safeStudentId}_${startDate}_${endDate}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+
+      setExportImportMessageType('success');
+      setExportImportMessage('Program başarıyla dışa aktarıldı.');
+      setShowExportMenu(false);
+    } catch (error) {
+      console.error('Program dışa aktarılamadı:', error);
+      setExportImportMessageType('error');
+      setExportImportMessage(error.message || 'Program dışa aktarılamadı.');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleImportClick = () => {
+    if (importLoading) return;
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!student?.id || !teacherId) {
+      setExportImportMessageType('error');
+      setExportImportMessage('Öğrenci veya öğretmen bilgisi bulunamadı.');
+      event.target.value = '';
+      return;
+    }
+
+    setImportLoading(true);
+    setExportImportMessage('');
+
+    try {
+      const fileContent = await file.text();
+      const parsedData = JSON.parse(fileContent);
+
+      const response = await fetch(
+        'https://vedatdaglarmuhendislik.com.tr/php-backend/api/import_student_program.php',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            studentId: student.id,
+            teacherId,
+            replaceExisting: true,
+            importData: parsedData
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        setExportImportMessageType('success');
+        setExportImportMessage('Program başarıyla içe aktarıldı.');
+        setShowExportMenu(false);
+        fetchStudentProgram();
+        fetchStudentRoutines();
+      } else {
+        throw new Error(data.message || 'Program içe aktarılamadı.');
+      }
+    } catch (error) {
+      console.error('Program içe aktarılamadı:', error);
+      setExportImportMessageType('error');
+      setExportImportMessage(error.message || 'Program içe aktarılamadı.');
+    } finally {
+      setImportLoading(false);
+      event.target.value = '';
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // Günün programlarını getir
+  const getDayPrograms = (date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return programs.filter(p => p.tarih === dateStr);
+  };
+
+  const getStatusLabel = (status) => {
+    if (status === 'yapildi') return 'Yapıldı';
+    if (status === 'eksik_yapildi') return 'Eksik Yapıldı';
+    if (status === 'yapilmadi') return 'Yapılmadı';
+    return 'Yapılacak';
+  };
+
+  const renderPrintProgramCard = (prog, idx) => {
+    const startTime = (prog.baslangic_saati || '').substring(0, 5);
+    const endTime = prog.bitis_saati ? prog.bitis_saati.substring(0, 5) : '';
+    const status = prog.durum || 'yapilmadi';
+    const ders = prog.ders || '';
+    const konu = prog.konu;
+    const kaynak = prog.kaynak;
+    const aciklama = prog.aciklama;
+    const soruSayisi = prog.soru_sayisi || prog.soruSayisi;
+    const programTipi = prog.program_tipi || prog.programTipi || 'soru_cozum';
+    const isRoutine = !!prog.is_routine;
+
+    return (
+      <div
+        key={`print-${prog.id || idx}-${prog.tarih}-${startTime}-${endTime}`}
+        className={`program-item program-item-print${isRoutine ? ' program-item-routine' : ''}`}
+        style={{
+          background: getGradientBackground(getProgramColor(prog))
+        }}
+      >
+        <div className="program-item-time">
+          {startTime}
+          {endTime ? ` - ${endTime}` : ''}
+        </div>
+        <div className="program-item-subject">
+          {(() => {
+            const iconSrc = getSubjectIcon(ders);
+            return iconSrc ? (
+              <img 
+                src={iconSrc} 
+                alt="" 
+                className="program-item-ders-icon"
+                onError={(e) => {
+                  console.error('Görsel yüklenemedi:', iconSrc, ders);
+                  e.target.style.display = 'none';
+                }}
+              />
+            ) : null;
+          })()}
+          <span className="program-item-ders">{ders}</span>
+          {konu && <span className="program-item-konu"> - {konu}</span>}
+        </div>
+        <div className="program-item-details">
+          <div className="program-item-type">
+            <span className="program-item-type-title">
+              {isRoutine ? 'Rutin · ' : ''}
+              {programTipi === 'deneme'
+                ? 'Deneme'
+                : programTipi === 'konu_anlatim'
+                ? 'Konu Anlatımı'
+                : 'Soru Çözümü'}
+            </span>
+            {soruSayisi && (
+              <span className="program-item-type-count">{soruSayisi} soru</span>
+            )}
+          </div>
+          {kaynak && (
+            <div className="program-item-kaynak">
+              <FontAwesomeIcon icon={faBook} />
+              {kaynak}
+            </div>
+          )}
+          {aciklama && (
+            <div className="program-item-aciklama">
+              {aciklama}
+            </div>
+          )}
+        </div>
+        <div className={`program-item-durum durum-${status}`}>
+          {getStatusLabel(status)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPrintDayColumn = (day) => {
+    const dayPrograms = getDayPrograms(day);
+    const dayName = day.toLocaleDateString('tr-TR', { weekday: 'short' });
+    const dayNumber = day.toLocaleDateString('tr-TR', { day: 'numeric' });
+
+    return (
+      <div key={`print-day-${day.toISOString()}`} className="print-day-column">
+        <div className="print-day-header">
+          <span className="print-day-name">{dayName}</span>
+          <span className="print-day-number">{dayNumber}</span>
+        </div>
+        <div className="print-day-programs">
+          {dayPrograms.length
+            ? dayPrograms.map((prog, index) => renderPrintProgramCard(prog, index))
+            : <div className="print-empty-day">Program bulunamadı</div>}
+        </div>
+      </div>
+    );
+  };
+
+  // Program tipi ikonunu getir
+  const getProgramIcon = (tip) => {
+    switch (tip) {
+      case 'soru_cozum':
+        return faClipboardList;
+      case 'konu_anlatim':
+        return faBook;
+      case 'deneme':
+        return faFileAlt;
+      default:
+        return faCalendarAlt;
+    }
+  };
+
+  // Program tipi rengini getir
+  const getProgramColor = (program) => {
+    if (!program) return '#6b7280';
+
+    const dersColor = getSubjectColor(program.ders);
+    if (dersColor) {
+      return dersColor;
+    }
+
+    switch (program.program_tipi) {
+      case 'soru_cozum':
+        return '#3b82f6'; // Mavi
+      case 'konu_anlatim':
+        return '#10b981'; // Yeşil
+      case 'deneme':
+        return '#f59e0b'; // Turuncu
+      default:
+        return '#6b7280';
+    }
+  };
+
+  // Hex color'ı rgba'ya çevir
+  const hexToRgba = (hex, alpha = 0.7) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  // Gradyan arkaplan oluştur - çok belirgin gradyan (açık renkten koyu renge)
+  const getGradientBackground = (color) => {
+    // Renk tonlarını ayarla - daha açık ve daha koyu versiyonlar
+    const rgb = {
+      r: parseInt(color.slice(1, 3), 16),
+      g: parseInt(color.slice(3, 5), 16),
+      b: parseInt(color.slice(5, 7), 16)
+    };
+    
+    // Açık ton (başlangıç) - rengi %20 açıkla ve opacity 0.75
+    const lightR = Math.min(255, rgb.r + (255 - rgb.r) * 0.2);
+    const lightG = Math.min(255, rgb.g + (255 - rgb.g) * 0.2);
+    const lightB = Math.min(255, rgb.b + (255 - rgb.b) * 0.2);
+    const lightColor = `rgba(${Math.round(lightR)}, ${Math.round(lightG)}, ${Math.round(lightB)}, 0.75)`;
+    
+    // Orta-açık ton - rengi %10 açıkla ve opacity 0.85
+    const midLightR = Math.min(255, rgb.r + (255 - rgb.r) * 0.1);
+    const midLightG = Math.min(255, rgb.g + (255 - rgb.g) * 0.1);
+    const midLightB = Math.min(255, rgb.b + (255 - rgb.b) * 0.1);
+    const midLightColor = `rgba(${Math.round(midLightR)}, ${Math.round(midLightG)}, ${Math.round(midLightB)}, 0.85)`;
+    
+    // Orta ton - orijinal renk, opacity 0.9
+    const midColor = hexToRgba(color, 0.9);
+    
+    // Koyu ton - rengi %15 koyulaştır ve opacity 0.95
+    const darkR = Math.max(0, rgb.r * 0.85);
+    const darkG = Math.max(0, rgb.g * 0.85);
+    const darkB = Math.max(0, rgb.b * 0.85);
+    const darkColor = `rgba(${Math.round(darkR)}, ${Math.round(darkG)}, ${Math.round(darkB)}, 0.95)`;
+    
+    return `linear-gradient(135deg, ${lightColor} 0%, ${midLightColor} 25%, ${midColor} 60%, ${darkColor} 100%)`;
+  };
+
+  // Program tipi adını getir
+  const getProgramTypeName = (tip) => {
+    switch (tip) {
+      case 'soru_cozum':
+        return 'Soru Çözümü';
+      case 'konu_anlatim':
+        return 'Konu Anlatımı';
+      case 'deneme':
+        return 'Deneme';
+      default:
+        return tip;
+    }
+  };
+  
+  // TemplateCreatorModal için helper fonksiyonlar (export edilmeli veya component içinde tanımlanmalı)
+  // Bu fonksiyonlar TemplateCreatorModal içinde de kullanılacak
+
+  // Saat slotları (30 dakikalık aralıklar)
+  const timeSlots = [];
+  for (let hour = 8; hour < 22; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const startTime = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+      const endMinute = minute + 30;
+      const endHour = endMinute >= 60 ? hour + 1 : hour;
+      const finalEndMinute = endMinute >= 60 ? endMinute - 60 : endMinute;
+      const endTime = `${endHour.toString().padStart(2, '0')}:${finalEndMinute.toString().padStart(2, '0')}`;
+      timeSlots.push({ start: startTime, end: endTime });
+    }
+  }
+
+  return (
+    <div className="ogrenci-program-tab">
+      <div className="program-header">
+        <div className="week-navigation">
+          <button className="nav-btn" onClick={handlePrevWeek}>
+            <FontAwesomeIcon icon={faChevronLeft} />
+          </button>
+          <button className="today-btn" onClick={handleToday}>Bugün</button>
+          <button className="nav-btn" onClick={handleNextWeek}>
+            <FontAwesomeIcon icon={faChevronRight} />
+          </button>
+          <div className="week-range">
+            {weekDays[0].toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} - {weekDays[6].toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+        <div className="program-actions">
+          <input
+            type="file"
+            accept="application/json"
+            ref={importFileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
+          <button type="button" className="program-action-btn btn-ai" onClick={handleOpenAiAnalysis}>
+            <FontAwesomeIcon icon={faRobot} /> Yapay Zeka AI
+          </button>
+          <button type="button" className="program-action-btn btn-analysis" onClick={handleOpenTeacherAnalysis}>
+            <FontAwesomeIcon icon={faChartLine} /> Konu Başarı Analizi
+          </button>
+          <button type="button" className="program-action-btn btn-routine" onClick={openRoutineModal}>
+            <FontAwesomeIcon icon={faClipboardList} /> Rutin Görevler
+          </button>
+          <button
+            type="button"
+            className="program-action-btn btn-template"
+            onClick={() => setShowTemplateList(true)}
+          >
+            <FontAwesomeIcon icon={faCalendarAlt} /> Hazır Şablonlar
+          </button>
+          <div className="export-import-group" ref={exportMenuRef}>
+            <button
+              type="button"
+              className={`program-action-btn btn-export ${showExportMenu ? 'active' : ''}`}
+              onClick={handleToggleExportMenu}
+              ref={exportButtonRef}
+            >
+              <span className="export-icons">
+                <FontAwesomeIcon icon={faFileExport} />
+                <FontAwesomeIcon icon={faFileImport} />
+              </span>
+              Dışarı Aktar / İçeri Aktar
+            </button>
+            {showExportMenu && (
+              <div className="export-dropdown">
+                <button
+                  type="button"
+                  className="export-dropdown-item"
+                  onClick={handleExportProgram}
+                  disabled={exportLoading}
+                >
+                  {exportLoading ? 'Dışa Aktarılıyor...' : 'Dışarı Aktar'}
+                </button>
+                <button
+                  type="button"
+                  className="export-dropdown-item"
+                  onClick={handleImportClick}
+                  disabled={importLoading}
+                >
+                  {importLoading ? 'İçe Aktarılıyor...' : 'İçeri Aktar'}
+          </button>
+        </div>
+            )}
+      </div>
+          <button type="button" className="program-action-btn btn-print" onClick={handlePrint}>
+            <FontAwesomeIcon icon={faPrint} /> Yazdır
+          </button>
+          <button
+            type="button"
+            className="program-action-btn btn-clear-week"
+            onClick={handleClearWeekProgram}
+            disabled={clearingWeek}
+          >
+            <FontAwesomeIcon icon={faTrash} />{' '}
+            {clearingWeek ? 'Siliniyor...' : 'Haftalık Programı Temizle'}
+          </button>
+        </div>
+      </div>
+      {exportImportMessage && (
+        <div className={`export-import-message ${exportImportMessageType}`}>
+          {exportImportMessage}
+        </div>
+      )}
+
+      <div className="program-calendar-container program-print-area">
+        <div className="screen-calendar">
+          <div className="program-calendar">
+        <div className="calendar-header">
+          {weekDays.map((day, index) => (
+            <div key={index} className="day-header">
+              <div className="calendar-day-label">
+                <div className="day-name">
+                {day.toLocaleDateString('tr-TR', { weekday: 'short' })}
+              </div>
+              <div className="day-number">
+                {day.toLocaleDateString('tr-TR', { day: 'numeric' })}
+              </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className="calendar-body-wrapper"
+          style={{
+            transform: `scale(${calendarScale})`,
+            transformOrigin: 'top left',
+            width: `${(1 / calendarScale) * 100}%`
+          }}
+        >
+          <div className="calendar-body">
+            {weekDays.map((day, dayIndex) => {
+              const dayPrograms = getDayPrograms(day);
+              
+              return (
+                <div 
+                  key={dayIndex} 
+                  className="day-column"
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, day)}
+                >
+                  <div className="programs-list">
+                    {dayPrograms.map((prog) => {
+                      const isRoutine = !!prog.is_routine;
+                      const startTime = (prog.baslangic_saati || '').substring(0, 5);
+                      const endTime = prog.bitis_saati ? prog.bitis_saati.substring(0, 5) : '';
+                      const isEditing = editingProgram?.id === prog.id;
+
+                      if (isEditing) {
+                        return (
+                          <div
+                            key={`edit-${prog.id}`}
+                            className="inline-program-form"
+                            ref={editProgramFormRef}
+                          >
+                            <form onSubmit={handleUpdateProgram}>
+                              <div className="inline-form-group">
+                                <label>Etüt Süresi (dakika)</label>
+                                <input
+                                  type="number"
+                                  min="5"
+                                  step="5"
+                                  value={programForm.etutSuresi ?? ''}
+                                  onChange={(e) => handleEtutDurationChange(e.target.value)}
+                                  placeholder="Örn: 40"
+                                />
+                              </div>
+                              <div className="inline-form-row">
+                                <div className="inline-form-group">
+                                  <label>Başlangıç Saati</label>
+                                  <input
+                                    type="time"
+                                    value={programForm.baslangicSaati}
+                                    onChange={(e) => handleStartTimeChange(e.target.value)}
+                                    onBlur={() => handleStartTimeBlur(editFormEndTimeInputRef)}
+                                    required
+                                  />
+                                </div>
+                                <div className="inline-form-group">
+                                  <label>Bitiş Saati</label>
+                                  <input
+                                    type="time"
+                                    value={programForm.bitisSaati}
+                                    onChange={(e) => setProgramForm({ ...programForm, bitisSaati: e.target.value })}
+                                    required
+                                    ref={editFormEndTimeInputRef}
+                                  />
+                                </div>
+                              </div>
+                              <div className="inline-form-group">
+                                <label>Ders</label>
+                                <select
+                                  value={programForm.ders}
+                                  onChange={(e) => setProgramForm({ ...programForm, ders: e.target.value })}
+                                  required
+                                >
+                                  <option value="">Seçiniz</option>
+                                  {dersOptions.map((ders, index) => (
+                                    <option key={index} value={ders}>{ders}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {programForm.programTipi !== 'deneme' && (
+                                <div className="inline-form-group">
+                                  <label>Konu</label>
+                                  <input
+                                    type="text"
+                                    value={programForm.konu}
+                                    onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                                    placeholder="Örn: Türev"
+                                  />
+                                </div>
+                              )}
+                              <div className="inline-form-group">
+                                <label>Program Tipi</label>
+                                <select
+                                  value={programForm.programTipi}
+                                  onChange={(e) => setProgramForm({ ...programForm, programTipi: e.target.value })}
+                                  required
+                                >
+                                  <option value="soru_cozum">Soru Çözümü</option>
+                                  <option value="konu_anlatim">Konu Anlatımı</option>
+                                  <option value="deneme">Deneme</option>
+                                </select>
+                              </div>
+                              <div className="inline-form-row">
+                                {programForm.programTipi === 'soru_cozum' && (
+                                  <div className="inline-form-group">
+                                    <label>Soru Sayısı</label>
+                                    <input
+                                      type="number"
+                                      value={programForm.soruSayisi}
+                                      onChange={(e) => setProgramForm({ ...programForm, soruSayisi: e.target.value })}
+                                      min="1"
+                                      placeholder="Örn: 70"
+                                    />
+                                  </div>
+                                )}
+                                <div className="inline-form-group">
+                                  <label>Kaynak</label>
+                                  <input
+                                    type="text"
+                                    value={programForm.kaynak}
+                                    onChange={(e) => setProgramForm({ ...programForm, kaynak: e.target.value })}
+                                    placeholder="Örn: 3-4-5"
+                                  />
+                                </div>
+                              </div>
+                              <div className="inline-form-group">
+                                <label>Açıklama</label>
+                                <textarea
+                                  value={programForm.aciklama}
+                                  onChange={(e) => setProgramForm({ ...programForm, aciklama: e.target.value })}
+                                  rows="2"
+                                  placeholder="İsteğe bağlı açıklama..."
+                                />
+                              </div>
+                              <div className="inline-form-actions">
+                                <button type="button" className="cancel-btn" onClick={handleCancelEdit}>
+                                  İptal
+                                </button>
+                                <button type="submit" className="save-btn">
+                                  Güncelle
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={prog.id}
+                            className={`program-item${isRoutine ? ' program-item-routine' : ''}${
+                              openStatusDropdown === prog.id ? ' program-item-status-open' : ''
+                            }`}
+                          style={{ 
+                            background: getGradientBackground(getProgramColor(prog))
+                          }}
+                          draggable={!isRoutine}
+                          onDragStart={(e) => {
+                            if (isRoutine) return;
+                            handleDragStart(e, prog);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {/* Header with time + actions */}
+                          <div className="program-item-header">
+                            <div className="program-item-time">
+                              {startTime}
+                              {endTime ? ` - ${endTime}` : ''}
+                            </div>
+                              <div className="program-item-actions">
+                              {!isRoutine && (
+                                <>
+                                <button
+                                  className="edit-program-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditProgram(prog);
+                                  }}
+                                  title="Düzenle"
+                                >
+                                  <FontAwesomeIcon icon={faEdit} />
+                                </button>
+                                <button
+                                  className="copy-program-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopyProgram(prog);
+                                  }}
+                                  title="Kopyala"
+                                >
+                                  <FontAwesomeIcon icon={faCopy} />
+                                </button>
+                                </>
+                              )}
+                                <button
+                                  className="delete-program-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                  handleDeleteProgram(
+                                    prog.id,
+                                    isRoutine,
+                                    prog.tarih,
+                                    prog.routine_id,
+                                    prog.ogrenci_id
+                                  )
+                                  }}
+                                title={isRoutine ? 'Bu haftadan kaldır' : 'Sil'}
+                                >
+                                  <FontAwesomeIcon icon={faTrash} />
+                                </button>
+                              </div>
+                          </div>
+
+                          {/* Subject - Topic */}
+                          <div className="program-item-subject">
+                            {(() => {
+                              const iconSrc = getSubjectIcon(prog.ders);
+                              return iconSrc ? (
+                                <img 
+                                  src={iconSrc} 
+                                  alt="" 
+                                  className="program-item-ders-icon"
+                                  onError={(e) => {
+                                    console.error('Görsel yüklenemedi:', iconSrc, prog.ders);
+                                    e.target.style.display = 'none';
+                                  }}
+                                />
+                              ) : null;
+                            })()}
+                            <span className="program-item-ders">{prog.ders}</span>
+                            {prog.konu && (
+                              <span className="program-item-konu"> - {prog.konu}</span>
+                            )}
+                          </div>
+
+                          {/* Program type + soru sayısı */}
+                          <div className="program-item-type">
+                            <div className="program-item-type-title">
+                              <span>
+                                {getProgramTypeName(prog.program_tipi)}
+                              </span>
+                            </div>
+                            {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (
+                              <span className="program-item-type-count"> - {prog.soru_sayisi} soru</span>
+                            )}
+                          </div>
+
+                          {/* Details section: Kaynak, Açıklama, Soru Sayısı */}
+                          <div className="program-item-details">
+                            {prog.kaynak && (
+                              <div className="program-item-kaynak">📚 {prog.kaynak}</div>
+                            )}
+                            {prog.aciklama && (
+                              <div 
+                                className={`program-item-aciklama ${expandedAciklama.has(prog.id) ? 'expanded' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleAciklama(prog.id);
+                                }}
+                                title="Tıklayarak genişlet/küçült"
+                              >
+                                💬 {prog.aciklama}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Status */}
+                          {(() => {
+                            const status = prog.durum || 'yapilmadi';
+                            const statusLabel =
+                              status === 'yapildi'
+                                ? '✓ Yapıldı'
+                                : status === 'eksik_yapildi'
+                                ? '⚠ Eksik Yapıldı'
+                                : '✗ Yapılmadı';
+                            const displayLabel = isRoutine ? `Rutin · ${statusLabel}` : statusLabel;
+
+                            return (
+                              <div className="program-item-status-wrapper">
+                                <div
+                                  className={`program-item-durum durum-${status}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenStatusDropdown((prev) =>
+                                      prev === prog.id ? null : prog.id
+                                    );
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <span>{displayLabel}</span>
+                                  <FontAwesomeIcon
+                                    icon={
+                                      openStatusDropdown === prog.id ? faChevronUp : faChevronDown
+                                    }
+                                    className="status-dropdown-caret"
+                                />
+                              </div>
+                                {openStatusDropdown === prog.id && (
+                                  <div
+                                    className="status-dropdown-menu"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                      type="button"
+                                      className={`status-dropdown-item ${
+                                        status === 'yapildi' ? 'active' : ''
+                                      }`}
+                                      onClick={() => handleStatusUpdate(prog, 'yapildi')}
+                                    >
+                                      ✓ Yapıldı
+                              </button>
+                                    <button
+                                      type="button"
+                                      className={`status-dropdown-item ${
+                                        status === 'eksik_yapildi' ? 'active' : ''
+                                      }`}
+                                      onClick={() => handleStatusUpdate(prog, 'eksik_yapildi')}
+                                    >
+                                      ⚠ Eksik Yapıldı
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`status-dropdown-item ${
+                                        status === 'yapilmadi' ? 'active' : ''
+                                      }`}
+                                      onClick={() => handleStatusUpdate(prog, 'yapilmadi')}
+                                    >
+                                      ✗ Yapılmadı
+                              </button>
+                            </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
+                    
+                    {/* Görev Ekle Butonu */}
+                    {addingProgramDay?.getTime() !== day.getTime() && (
+                      <button
+                        className="add-program-inline-btn"
+                        onClick={() => handleAddProgramClick(day)}
+                      >
+                        <FontAwesomeIcon icon={faPlus} /> Görev Ekle
+                      </button>
+                    )}
+                    
+                    {/* Inline Program Ekleme Formu */}
+                    {addingProgramDay?.getTime() === day.getTime() && (
+                      <div
+                        className="inline-program-form"
+                        ref={addProgramFormRef}
+                      >
+                        <form onSubmit={handleProgramSubmit}>
+                              <div className="inline-form-group">
+                                <label>Etüt Süresi (dakika)</label>
+                                <input
+                                  type="number"
+                                  min="5"
+                                  step="5"
+                                  value={programForm.etutSuresi ?? ''}
+                                  onChange={(e) => handleEtutDurationChange(e.target.value)}
+                                  placeholder="Örn: 40"
+                                />
+                              </div>
+                          <div className="inline-form-row">
+                            <div className="inline-form-group">
+                              <label>Başlangıç Saati</label>
+                              <input
+                                type="time"
+                                value={programForm.baslangicSaati}
+                                    onChange={(e) => handleStartTimeChange(e.target.value)}
+                                    onBlur={() => handleStartTimeBlur(addFormEndTimeInputRef)}
+                                required
+                              />
+                            </div>
+                            <div className="inline-form-group">
+                              <label>Bitiş Saati</label>
+                              <input
+                                type="time"
+                                value={programForm.bitisSaati}
+                                onChange={(e) => setProgramForm({ ...programForm, bitisSaati: e.target.value })}
+                                required
+                                    ref={addFormEndTimeInputRef}
+                              />
+                            </div>
+                            </div>
+                            <div className="inline-form-group">
+                              <label>Ders</label>
+                              <select
+                                value={programForm.ders}
+                                onChange={(e) => setProgramForm({ ...programForm, ders: e.target.value })}
+                                required
+                              >
+                                <option value="">Seçiniz</option>
+                                {dersOptions.map((ders, index) => (
+                                  <option key={index} value={ders}>{ders}</option>
+                                ))}
+                              </select>
+                          </div>
+                          {programForm.programTipi !== 'deneme' && (
+                            <div className="inline-form-group">
+                              <label>Konu</label>
+                              <input
+                                type="text"
+                                value={programForm.konu}
+                                onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                                placeholder="Örn: Türev"
+                              />
+                            </div>
+                          )}
+                            <div className="inline-form-group">
+                            <label>Program Tipi</label>
+                            <select
+                              value={programForm.programTipi}
+                              onChange={(e) => setProgramForm({ ...programForm, programTipi: e.target.value })}
+                              required
+                            >
+                              <option value="soru_cozum">Soru Çözümü</option>
+                              <option value="konu_anlatim">Konu Anlatımı</option>
+                              <option value="deneme">Deneme</option>
+                            </select>
+                            </div>
+                          <div className="inline-form-row">
+                            {programForm.programTipi === 'soru_cozum' && (
+                              <div className="inline-form-group">
+                                <label>Soru Sayısı</label>
+                                <input
+                                  type="number"
+                                  value={programForm.soruSayisi}
+                                  onChange={(e) => setProgramForm({ ...programForm, soruSayisi: e.target.value })}
+                                  min="1"
+                                  placeholder="Örn: 70"
+                                />
+                              </div>
+                            )}
+                            <div className="inline-form-group">
+                              <label>Kaynak</label>
+                              <input
+                                type="text"
+                                value={programForm.kaynak}
+                                onChange={(e) => setProgramForm({ ...programForm, kaynak: e.target.value })}
+                                placeholder="Örn: 3-4-5"
+                              />
+                            </div>
+                          </div>
+                          <div className="inline-form-group">
+                            <label>Açıklama</label>
+                            <textarea
+                              value={programForm.aciklama}
+                              onChange={(e) => setProgramForm({ ...programForm, aciklama: e.target.value })}
+                              rows="2"
+                              placeholder="İsteğe bağlı açıklama..."
+                            />
+                          </div>
+                          <div className="inline-form-actions">
+                            <button type="button" className="cancel-btn" onClick={handleCancelAddProgram}>
+                              İptal
+                            </button>
+                            <button type="submit" className="save-btn">
+                              Kaydet
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Time slot'ları render et - artık sadece görsel referans için */}
+                  <div className="time-slots-container">
+                    {timeSlots.map((slot, slotIndex) => (
+                      <div
+                        key={slotIndex}
+                        className="time-slot"
+                      >
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        <div className="calendar-zoom-controls">
+          <button type="button" className="zoom-btn" onClick={handleZoomOut}>-</button>
+          <button type="button" className="zoom-btn" onClick={handleZoomIn}>+</button>
+        </div>
+      </div>
+        </div>
+        <div className="print-calendar">
+          <div className="print-calendar-page columns-4">
+            <div className="print-day-grid columns-4">
+              {firstPrintDays.map((day) => renderPrintDayColumn(day))}
+            </div>
+          </div>
+          {secondPrintDays.length > 0 && (
+            <div className="print-calendar-page columns-3 print-calendar-page-last">
+              <div className="print-day-grid columns-3">
+                {secondPrintDays.map((day) => renderPrintDayColumn(day))}
+              </div>
+            </div>
+          )}
+      </div>
+      </div>
+
+      <div className="analysis-section">
+        <div className="analysis-card teacher-analysis-card" ref={teacherAnalysisRef}>
+          <div className="analysis-card-header">
+            <h3>Öğretmen Analiz Yorumu</h3>
+            {weekDays[0] && (
+              <span className="analysis-week-label">
+                {weekDays[0].toLocaleDateString('tr-TR', {
+                  day: 'numeric',
+                  month: 'long'
+                })}
+              </span>
+            )}
+          </div>
+          <textarea
+            value={teacherAnalysis}
+            onChange={(e) => setTeacherAnalysis(e.target.value)}
+            placeholder="Bu hafta için genel değerlendirmelerinizi buraya yazın..."
+            rows={6}
+            disabled={analysisLoading}
+          />
+          <div className="analysis-actions">
+            <button
+              className="save-btn"
+              onClick={handleSaveTeacherAnalysis}
+              disabled={teacherAnalysisSaving || analysisLoading}
+            >
+              {teacherAnalysisSaving ? 'Kaydediliyor...' : 'Yorumu Kaydet'}
+          </button>
+            <button
+              type="button"
+              className="send-parent-btn"
+            >
+              Haftalık Analizi Veliye Gönder
+          </button>
+            {teacherAnalysisMessage && (
+              <span className={`analysis-message ${teacherAnalysisMessageType === 'error' ? 'error' : 'success'}`}>
+                {teacherAnalysisMessage}
+              </span>
+            )}
+        </div>
+                  </div>
+
+        <div className="analysis-card ai-analysis-card" ref={aiAnalysisRef}>
+          <div className="analysis-card-header">
+            <h3>AI Analiz Yorumu</h3>
+                </div>
+          <div className="ai-analysis-placeholder">
+            {aiAnalysis
+              ? aiAnalysis
+              : 'AI destekli analiz yorumları yakında burada görünecek.'}
+                </div>
+          <div className="analysis-actions">
+            <button
+              type="button"
+              className="send-parent-btn"
+            >
+              Haftalık Analizi Veliye Gönder
+            </button>
+                </div>
+              </div>
+      </div>
+
+      {/* Rutin Görev Modalı */}
+      {showRoutineModal && (
+        <div className="program-modal-overlay" onClick={closeRoutineModal}>
+          <div className="program-modal routine-modal" onClick={(e) => e.stopPropagation()}>
+            {routineModalMode === 'list' ? (
+              <>
+            <div className="modal-header">
+                  <h3>Rutin Görevler</h3>
+              <button className="close-btn" onClick={closeRoutineModal}>×</button>
+            </div>
+                <div className="routine-modal-content">
+                  <button className="routine-add-btn" onClick={startRoutineCreation}>
+                    <FontAwesomeIcon icon={faPlus} /> Yeni Rutin
+                  </button>
+                  {routineError && <div className="form-error routine-error">{routineError}</div>}
+                  {routines.length === 0 ? (
+                    <div className="routine-empty-state">
+                      Henüz tanımlı rutin görev yok.
+                    </div>
+                  ) : (
+                    <div className="routine-modal-list">
+                      {routines.map((routine) => (
+                        <div key={routine.id} className="routine-modal-item">
+                          <div className="routine-item-header">
+                            <div className="routine-item-days">
+                              <FontAwesomeIcon icon={faCalendarAlt} /> {formatRoutineDays(routine.gunler)}
+                            </div>
+                            <div className="routine-item-time">
+                              <FontAwesomeIcon icon={faClock} /> {(routine.saat || '').substring(0, 5)}
+                              {routine.bitisSaati ? ` - ${routine.bitisSaati}` : ''}
+                            </div>
+                          </div>
+                          <div className="routine-item-body">
+                            <span className="routine-item-type">{getProgramTypeName(routine.programTipi)}</span>
+                            <span className="routine-item-ders">{routine.ders}</span>
+                            {routine.konu && <span className="routine-item-konu">Konu: {routine.konu}</span>}
+                            {routine.kaynak && <span className="routine-item-kaynak">Kaynak: {routine.kaynak}</span>}
+                            {routine.soruSayisi ? <span className="routine-item-soru">{routine.soruSayisi} soru</span> : null}
+                          </div>
+                          {routine.aciklama && (
+                            <div className="routine-item-aciklama">💬 {routine.aciklama}</div>
+                          )}
+                          <div className="routine-item-actions">
+                            <button
+                              className="edit-program-btn"
+                              onClick={() => startRoutineEdit(routine)}
+                            >
+                              <FontAwesomeIcon icon={faEdit} /> Düzenle
+                            </button>
+                            <button
+                              className="delete-program-btn"
+                              onClick={() => handleDeleteRoutine(routine.id)}
+                            >
+                              <FontAwesomeIcon icon={faTrash} /> Sil
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+            <form className="program-form" onSubmit={handleRoutineSubmit}>
+                <div className="modal-header">
+                  <div className="modal-header-left">
+                    <button type="button" className="back-btn" onClick={returnToRoutineList}>
+                      <FontAwesomeIcon icon={faArrowLeft} />
+                    </button>
+                    <h3>{editingRoutine ? 'Rutin Görev Düzenle' : 'Rutin Görev Oluştur'}</h3>
+                  </div>
+                  <button className="close-btn" onClick={closeRoutineModal}>×</button>
+                </div>
+
+              <div className="form-group">
+                <label>Günler</label>
+                <div className="routine-days-grid">
+                  {DAY_OPTIONS.map((day) => (
+                    <label
+                      key={day.value}
+                      className={`routine-day-option ${routineForm.gunler.includes(day.value) ? 'selected' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        value={day.value}
+                        checked={routineForm.gunler.includes(day.value)}
+                        onChange={() => handleRoutineDayToggle(day.value)}
+                      />
+                      {day.short}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Başlangıç Saati</label>
+                  <input
+                    type="time"
+                    name="saat"
+                    value={routineForm.saat}
+                    onChange={handleRoutineFormChange}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Bitiş Saati</label>
+                  <input
+                    type="time"
+                    name="bitisSaati"
+                    value={routineForm.bitisSaati}
+                    onChange={handleRoutineFormChange}
+                    required
+                  />
+                </div>
+              </div>
+
+                <div className="form-group">
+                  <label>Program Tipi</label>
+                  <select
+                    name="programTipi"
+                    value={routineForm.programTipi}
+                    onChange={handleRoutineFormChange}
+                  >
+                    <option value="soru_cozum">Soru Çözümü</option>
+                    <option value="konu_anlatim">Konu Anlatımı</option>
+                    <option value="deneme">Deneme</option>
+                  </select>
+              </div>
+
+              <div className="form-group">
+                <label>Ders</label>
+                <select
+                  name="ders"
+                  value={routineForm.ders}
+                  onChange={handleRoutineFormChange}
+                  required
+                >
+                  <option value="">Seçiniz</option>
+                  {dersOptions.map((ders, index) => (
+                    <option key={index} value={ders}>{ders}</option>
+                  ))}
+                </select>
+              </div>
+
+              {routineForm.programTipi !== 'deneme' && (
+                <div className="form-group">
+                  <label>Konu</label>
+                  <input
+                    type="text"
+                    name="konu"
+                    value={routineForm.konu}
+                    onChange={handleRoutineFormChange}
+                    placeholder="Örn: Türev"
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Kaynak</label>
+                <input
+                  type="text"
+                  name="kaynak"
+                  value={routineForm.kaynak}
+                  onChange={handleRoutineFormChange}
+                  placeholder="Örn: 3-4-5"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Açıklama</label>
+                <textarea
+                  name="aciklama"
+                  value={routineForm.aciklama}
+                  onChange={handleRoutineFormChange}
+                  placeholder="Açıklama girin (isteğe bağlı)"
+                  rows="3"
+                />
+              </div>
+
+              {routineForm.programTipi === 'soru_cozum' && (
+                <div className="form-group">
+                  <label>Soru Sayısı</label>
+                  <input
+                    type="number"
+                    name="soruSayisi"
+                    value={routineForm.soruSayisi}
+                    onChange={handleRoutineFormChange}
+                    min="1"
+                    placeholder="Örn: 70"
+                  />
+                </div>
+              )}
+
+              {routineError && <div className="form-error">{routineError}</div>}
+
+              <div className="form-actions">
+                  <button type="button" className="cancel-btn" onClick={returnToRoutineList}>
+                    Geri
+                </button>
+                <button type="submit" className="save-btn" disabled={routineSaving}>
+                  {routineSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                </button>
+              </div>
+            </form>
+            )}
+            </div>
+                </div>
+              )}
+
+
+      {/* Şablon Listesi Modalı */}
+      {showTemplateList && (
+        <div className="program-modal-overlay" onClick={() => setShowTemplateList(false)}>
+          <div className="program-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Hazır Şablonlar</h3>
+              <button className="close-btn" onClick={() => setShowTemplateList(false)}>×</button>
+            </div>
+            <div className="template-list">
+              <div className="template-actions-header">
+              <button
+                className="add-template-btn"
+                onClick={() => {
+                  setShowTemplateList(false);
+                  setShowTemplateModal(true);
+                }}
+              >
+                <FontAwesomeIcon icon={faPlus} /> Yeni Şablon Oluştur
+              </button>
+                <button
+                  className="save-current-template-btn"
+                  onClick={handleSaveCurrentProgramAsTemplate}
+                >
+                  <FontAwesomeIcon icon={faSave} /> Mevcut Programı Şablon Olarak Kaydet
+                </button>
+                <button
+                  className="load-previous-week-btn"
+                  onClick={handleLoadPreviousWeekProgram}
+                >
+                  <FontAwesomeIcon icon={faHistory} /> Geçen Haftanın Programını Getir
+                </button>
+              </div>
+              {templates.length === 0 ? (
+                <div className="empty-templates">Henüz şablon oluşturulmamış</div>
+              ) : (
+                templates.map((template) => (
+                  <div key={template.id} className="template-item">
+                    <div className="template-info">
+                      <h4>{template.sablon_adi}</h4>
+                      {template.aciklama && <p>{template.aciklama}</p>}
+                    </div>
+                    <div style={{display:'flex', gap:8}}>
+                      <button
+                        className="apply-template-btn"
+                        onClick={() => handleApplyTemplate(template.id)}
+                      >
+                        Uygula
+                      </button>
+                      <button
+                        className="cancel-btn"
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_program_template_detail.php?templateId=${template.id}`);
+                            const data = await res.json();
+                            if (data.success) {
+                              setEditingTemplate({
+                                id: template.id,
+                                name: data.template.sablon_adi,
+                                description: data.template.aciklama || '',
+                                programs: data.details.map(d => ({
+                                  id: d.id,
+                                  gunNo: Number(d.gun_no),
+                                  programTipi: d.program_tipi,
+                                  ders: d.ders,
+                                  konu: d.konu,
+                                  soruSayisi: d.soru_sayisi,
+                                  baslangicSaati: d.baslangic_saati,
+                                  bitisSaati: d.bitis_saati
+                                }))
+                              });
+                              setShowTemplateList(false);
+                              setShowTemplateModal(true);
+                            } else {
+                              alert(data.message || 'Şablon yüklenemedi');
+                            }
+                          } catch (e) {
+                            alert('Şablon yüklenemedi');
+                          }
+                        }}
+                      >
+                        Düzenle
+                      </button>
+                      <button
+                        className="danger-btn"
+                        onClick={async () => {
+                          if (!window.confirm('Şablonu silmek istediğinize emin misiniz?')) return;
+                          try {
+                            const res = await fetch('https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_program_template.php', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ templateId: template.id })
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              fetchTemplates();
+                            } else {
+                              alert(data.message || 'Şablon silinemedi');
+                            }
+                          } catch (e) {
+                            alert('Şablon silinemedi');
+                          }
+                        }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Şablon Oluşturma Modalı - Bu kısım ayrı bir komponente taşınabilir */}
+      {showTemplateModal && (
+        <TemplateCreatorModal
+          teacherId={teacherId}
+          templateToEdit={editingTemplate}
+          onClose={() => { setShowTemplateModal(false); setEditingTemplate(null); }}
+          onSave={() => {
+            setShowTemplateModal(false);
+            setEditingTemplate(null);
+            fetchTemplates();
+          }}
+        />
+      )}
+
+      {/* Konu Başarımları Modal */}
+      {showTopicAnalysisModal && (
+        <div className="topic-analysis-modal-overlay" onClick={() => setShowTopicAnalysisModal(false)}>
+          <div 
+            className="topic-analysis-modal" 
+            ref={topicAnalysisModalRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '800px',
+              height: '600px',
+              minWidth: '600px',
+              minHeight: '400px'
+            }}
+          >
+            <div className="topic-analysis-modal-header" ref={topicAnalysisModalHeaderRef}>
+              <div className="topic-analysis-modal-title">
+                <FontAwesomeIcon icon={faGripLines} className="drag-handle-icon" />
+                <span>KONU BAŞARIMLARI</span>
+              </div>
+              <button 
+                className="topic-analysis-modal-close"
+                onClick={() => setShowTopicAnalysisModal(false)}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            </div>
+
+            <div className="topic-analysis-modal-content">
+
+              <div className="topic-analysis-filters">
+                <div className="filter-group">
+                  <label>DERS SEÇİN:</label>
+                  <select 
+                    value={topicAnalysisSubject} 
+                    onChange={(e) => setTopicAnalysisSubject(e.target.value)}
+                    className="topic-analysis-select"
+                  >
+                    <option value="">Tüm Dersler</option>
+                    {studentSubjects.map((subject, idx) => (
+                      <option key={idx} value={subject}>{subject}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label>TARİH FİLTRESİ:</label>
+                  <select 
+                    value={topicAnalysisDateFilter} 
+                    onChange={(e) => setTopicAnalysisDateFilter(e.target.value)}
+                    className="topic-analysis-select"
+                  >
+                    <option value="1_hafta">Son 1 Hafta</option>
+                    <option value="15_gun">Son 15 Gün</option>
+                    <option value="1_ay">Son 1 Ay</option>
+                    <option value="3_ay">Son 3 Ay</option>
+                    <option value="6_ay">Son 6 Ay</option>
+                    <option value="12_ay">Son 12 Ay</option>
+                    <option value="manuel">Manuel Tarih Aralığı</option>
+                  </select>
+                </div>
+
+                {topicAnalysisDateFilter === 'manuel' && (
+                  <div className="filter-group date-range-group">
+                    <label>Başlangıç:</label>
+                    <input 
+                      type="date" 
+                      value={topicAnalysisDateRange.start || ''}
+                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, start: e.target.value })}
+                      className="topic-analysis-date-input"
+                    />
+                    <label>Bitiş:</label>
+                    <input 
+                      type="date" 
+                      value={topicAnalysisDateRange.end || ''}
+                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, end: e.target.value })}
+                      className="topic-analysis-date-input"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="topic-analysis-table-container">
+                <table className="topic-analysis-table">
+                  <thead>
+                    <tr>
+                      <th>Konu</th>
+                      <th>Dinamik</th>
+                      <th>Son 3 Ay</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentTopics.length > 0 ? (
+                      studentTopics.map((topic, idx) => {
+                        const dynamicPercent = 0; // Şimdilik 0
+                        const last3MonthsPercent = 0; // Şimdilik 0
+                        const getPercentageClass = (percent) => {
+                          if (percent < 50) return 'percent-red';
+                          if (percent < 75) return 'percent-yellow';
+                          return 'percent-green';
+                        };
+                        return (
+                          <tr key={idx}>
+                            <td>{topic}</td>
+                            <td className={`topic-percentage ${getPercentageClass(dynamicPercent)}`}>
+                              {dynamicPercent}%
+                            </td>
+                            <td className={`topic-percentage ${getPercentageClass(last3MonthsPercent)}`}>
+                              {last3MonthsPercent}%
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan="3" style={{ textAlign: 'center', padding: '20px' }}>
+                          Henüz konu verisi bulunmamaktadır.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              
+            </div>
+
+            <div className="topic-analysis-modal-resize" ref={topicAnalysisModalResizeRef}>
+              <FontAwesomeIcon icon={faExpandArrowsAlt} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Helper fonksiyonlar (TemplateCreatorModal için de kullanılacak)
+const getProgramIconHelper = (tip) => {
+  switch (tip) {
+    case 'soru_cozum':
+      return faClipboardList;
+    case 'konu_anlatim':
+      return faBook;
+    case 'deneme':
+      return faFileAlt;
+    default:
+      return faCalendarAlt;
+  }
+};
+
+const getProgramColorHelper = (tip) => {
+  switch (tip) {
+    case 'soru_cozum':
+      return '#3b82f6';
+    case 'konu_anlatim':
+      return '#10b981';
+    case 'deneme':
+      return '#f59e0b';
+    default:
+      return '#6b7280';
+  }
+};
+
+const getProgramTypeNameHelper = (tip) => {
+  switch (tip) {
+    case 'soru_cozum':
+      return 'Soru Çözümü';
+    case 'konu_anlatim':
+      return 'Konu Anlatımı';
+    case 'deneme':
+      return 'Deneme';
+    default:
+      return tip;
+  }
+};
+
+// Şablon Oluşturma Modalı Komponenti
+const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) => {
+  const [templateName, setTemplateName] = useState(templateToEdit?.name || '');
+  const [templateDescription, setTemplateDescription] = useState(templateToEdit?.description || '');
+  const [currentWeek, setCurrentWeek] = useState(new Date());
+  const [templatePrograms, setTemplatePrograms] = useState(templateToEdit?.programs || []);
+  const [showAddProgram, setShowAddProgram] = useState(false);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const templateDefaultEtutDuration = useMemo(() => loadStoredEtutDuration(teacherId), [teacherId]);
+  const [programForm, setProgramForm] = useState({
+    programTipi: 'soru_cozum',
+    ders: '',
+    konu: '',
+    soruSayisi: '',
+    baslangicSaati: '',
+    bitisSaati: '',
+    etutSuresi: templateDefaultEtutDuration
+  });
+
+  const weekDays = useMemo(() => {
+    const startOfWeek = new Date(currentWeek);
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+    
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      days.push(date);
+    }
+    return days;
+  }, [currentWeek]);
+
+  const handleAddProgram = () => {
+    if (!selectedDay) return;
+
+    const newProgram = {
+      id: Date.now().toString(),
+      gunNo: selectedDay.getDay() === 0 ? 7 : selectedDay.getDay(), // Pazar = 7
+      programTipi: programForm.programTipi,
+      ders: programForm.ders,
+      konu: programForm.konu || null,
+      soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
+      baslangicSaati: programForm.baslangicSaati,
+      bitisSaati: programForm.bitisSaati
+    };
+
+    setTemplatePrograms([...templatePrograms, newProgram]);
+    setShowAddProgram(false);
+    setProgramForm({
+      programTipi: 'soru_cozum',
+      ders: '',
+      konu: '',
+      soruSayisi: '',
+      baslangicSaati: '',
+      bitisSaati: '',
+      etutSuresi: templateDefaultEtutDuration
+    });
+  };
+
+  const handleTemplateProgramDelete = (programId) => {
+    setTemplatePrograms(templatePrograms.filter(p => p.id !== programId));
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!templateName.trim()) {
+      alert('Şablon adı gereklidir');
+      return;
+    }
+
+    if (templatePrograms.length === 0) {
+      alert('En az bir program eklemelisiniz');
+      return;
+    }
+
+    try {
+      const isEdit = Boolean(templateToEdit?.id);
+      const url = isEdit 
+        ? 'https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_program_template.php'
+        : 'https://vedatdaglarmuhendislik.com.tr/php-backend/api/save_program_template.php';
+
+      const payload = isEdit
+        ? { templateId: templateToEdit.id, sablonAdi: templateName, aciklama: templateDescription, programs: templatePrograms }
+        : { teacherId, sablonAdi: templateName, aciklama: templateDescription, programs: templatePrograms };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        onSave();
+        alert(isEdit ? 'Şablon güncellendi' : 'Şablon başarıyla kaydedildi');
+      } else {
+        alert(data.message || (isEdit ? 'Şablon güncellenemedi' : 'Şablon kaydedilemedi'));
+      }
+    } catch (error) {
+      console.error('Şablon kaydet/güncelle hatası:', error);
+      alert('Şablon kaydetme/güncelleme başarısız');
+    }
+  };
+
+  const timeSlots = [];
+  for (let hour = 8; hour < 22; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const startTime = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+      const endMinute = minute + 30;
+      const endHour = endMinute >= 60 ? hour + 1 : hour;
+      const finalEndMinute = endMinute >= 60 ? endMinute - 60 : endMinute;
+      const endTime = `${endHour.toString().padStart(2, '0')}:${finalEndMinute.toString().padStart(2, '0')}`;
+      timeSlots.push({ start: startTime, end: endTime });
+    }
+  }
+
+  const getDayPrograms = (day) => {
+    const dayNo = day.getDay() === 0 ? 7 : day.getDay();
+    return templatePrograms.filter(p => p.gunNo === dayNo);
+  };
+
+  return (
+    <div className="program-modal-overlay" onClick={onClose}>
+      <div className="program-modal template-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{color: '#fff'}}>Yeni Şablon Oluştur</h3>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
+
+        <div className="template-form">
+          <div className="form-group">
+            <label>Şablon Adı</label>
+            <input
+              type="text"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="Örn: Haftalık Matematik Programı"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Açıklama</label>
+            <textarea
+              value={templateDescription}
+              onChange={(e) => setTemplateDescription(e.target.value)}
+              placeholder="Şablon hakkında açıklama (opsiyonel)"
+              rows="3"
+            />
+          </div>
+
+          <div className="template-calendar-section">
+            <div className="week-navigation">
+              <button className="nav-btn" onClick={() => {
+                const newWeek = new Date(currentWeek);
+                newWeek.setDate(newWeek.getDate() - 7);
+                setCurrentWeek(newWeek);
+              }}>
+                <FontAwesomeIcon icon={faChevronLeft} />
+              </button>
+              <div className="week-range">
+                {weekDays[0].toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} - {weekDays[6].toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </div>
+              <button className="nav-btn" onClick={() => {
+                const newWeek = new Date(currentWeek);
+                newWeek.setDate(newWeek.getDate() + 7);
+                setCurrentWeek(newWeek);
+              }}>
+                <FontAwesomeIcon icon={faChevronRight} />
+              </button>
+            </div>
+
+            <div className="template-calendar">
+              <div className="calendar-header">
+                {weekDays.map((day, index) => (
+                  <div key={index} className="day-header">
+                    <div className="day-name">
+                      {day.toLocaleDateString('tr-TR', { weekday: 'short' })}
+                    </div>
+                    <div className="day-number">
+                      {day.toLocaleDateString('tr-TR', { day: 'numeric' })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="calendar-body">
+
+                {weekDays.map((day, dayIndex) => {
+                  const dayPrograms = getDayPrograms(day);
+                  
+                  // Programların başlangıç slot index'lerini hesapla
+                  const programSlots = dayPrograms.map(prog => {
+                    const progStart = prog.baslangicSaati.substring(0, 5);
+                    const progEnd = prog.bitisSaati.substring(0, 5);
+                    
+                    // Başlangıç ve bitiş slot index'lerini bul
+                    const startSlotIndex = timeSlots.findIndex(s => s.start === progStart);
+                    const endSlotIndex = timeSlots.findIndex(s => s.end === progEnd);
+                    
+                    // Eğer tam eşleşme yoksa, en yakın slot'u bul
+                    let actualStartIndex = startSlotIndex;
+                    let actualEndIndex = endSlotIndex;
+                    
+                    if (actualStartIndex === -1) {
+                      actualStartIndex = timeSlots.findIndex(s => progStart >= s.start && progStart < s.end);
+                    }
+                    if (actualEndIndex === -1) {
+                      actualEndIndex = timeSlots.findIndex(s => progEnd > s.start && progEnd <= s.end);
+                      if (actualEndIndex === -1) {
+                        actualEndIndex = timeSlots.length - 1;
+                      }
+                    }
+                    
+                    const slotCount = Math.max(1, (actualEndIndex - actualStartIndex) + 1);
+                    
+                    return {
+                      program: prog,
+                      startSlotIndex: actualStartIndex,
+                      endSlotIndex: actualEndIndex,
+                      slotCount: slotCount
+                    };
+                  });
+                  
+                  return (
+                    <div key={dayIndex} className="day-column">
+                      {/* Program item'larını day-column içinde absolute positioning ile yerleştir */}
+                      {programSlots.map((ps, progIndex) => {
+                        const prog = ps.program;
+                        const topPosition = ps.startSlotIndex * 60; // Her slot 60px
+                        const height = ps.slotCount * 60 - 4; // 4px padding için
+                        
+                        return (
+                          <div
+                            key={progIndex}
+                            className="program-item"
+                            style={{ 
+                              backgroundColor: getProgramColorHelper(prog.programTipi),
+                              top: `${topPosition}px`,
+                              height: `${height}px`,
+                              position: 'absolute',
+                              left: '2px',
+                              right: '2px',
+                              zIndex: 10
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTemplateProgramDelete(prog.id);
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.zIndex = '20';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.zIndex = '10';
+                            }}
+                          >
+                            <div className="program-item-header">
+                              <FontAwesomeIcon icon={getProgramIconHelper(prog.programTipi)} />
+                              <span className="program-type">{getProgramTypeNameHelper(prog.programTipi)}</span>
+                            </div>
+                            <div className="program-item-time">
+                              {prog.baslangicSaati} - {prog.bitisSaati}
+                            </div>
+                            <div className="program-item-ders" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {(() => {
+                                const iconSrc = getSubjectIcon(prog.ders);
+                                return iconSrc ? (
+                                  <img 
+                                    src={iconSrc} 
+                                    alt="" 
+                                    className="program-item-ders-icon"
+                                    onError={(e) => {
+                                      console.error('Görsel yüklenemedi:', iconSrc, prog.ders);
+                                      e.target.style.display = 'none';
+                                    }}
+                                  />
+                                ) : null;
+                              })()}
+                              <span>{prog.ders}</span>
+                            </div>
+                            {prog.konu && (
+                              <div className="program-item-konu">{prog.konu}</div>
+                            )}
+                            {prog.soruSayisi && (
+                              <div className="program-item-soru">{prog.soruSayisi} soru</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      
+                      {/* Time slot'ları render et */}
+                      {timeSlots.map((slot, slotIndex) => (
+                        <div
+                          key={slotIndex}
+                          className="time-slot"
+                          onClick={() => {
+                            setSelectedDay(day);
+                            setShowAddProgram(true);
+                            setProgramForm({
+                              ...programForm,
+                              baslangicSaati: slot.start,
+                              bitisSaati: slot.end
+                            });
+                          }}
+                        >
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {showAddProgram && (
+            <div className="program-form-modal">
+              <div className="form-group">
+                <label>Program Tipi</label>
+                <select
+                  value={programForm.programTipi}
+                  onChange={(e) => setProgramForm({ ...programForm, programTipi: e.target.value })}
+                >
+                  <option value="soru_cozum">Soru Çözümü</option>
+                  <option value="konu_anlatim">Konu Anlatımı</option>
+                  <option value="deneme">Deneme</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Ders</label>
+                <input
+                  type="text"
+                  value={programForm.ders}
+                  onChange={(e) => setProgramForm({ ...programForm, ders: e.target.value })}
+                  required
+                />
+              </div>
+
+              {programForm.programTipi !== 'deneme' && (
+                <div className="form-group">
+                  <label>Konu</label>
+                  <input
+                    type="text"
+                    value={programForm.konu}
+                    onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                  />
+                </div>
+              )}
+
+              {programForm.programTipi === 'soru_cozum' && (
+                <div className="form-group">
+                  <label>Soru Sayısı</label>
+                  <input
+                    type="number"
+                    value={programForm.soruSayisi}
+                    onChange={(e) => setProgramForm({ ...programForm, soruSayisi: e.target.value })}
+                    min="1"
+                  />
+                </div>
+              )}
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Başlangıç Saati</label>
+                  <input
+                    type="time"
+                    value={programForm.baslangicSaati}
+                    onChange={(e) => setProgramForm({ ...programForm, baslangicSaati: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Bitiş Saati</label>
+                  <input
+                    type="time"
+                    value={programForm.bitisSaati}
+                    onChange={(e) => setProgramForm({ ...programForm, bitisSaati: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-actions">
+                <button type="button" className="cancel-btn" onClick={() => setShowAddProgram(false)}>
+                  İptal
+                </button>
+                <button type="button" className="save-btn" onClick={handleAddProgram}>
+                  Ekle
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="form-actions">
+            <button type="button" className="cancel-btn" onClick={onClose}>
+              İptal
+            </button>
+            <button type="button" className="save-btn" onClick={handleSaveTemplate}>
+              Şablonu Kaydet
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default OgrenciProgramTab;
+

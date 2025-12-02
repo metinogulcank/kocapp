@@ -1,24 +1,52 @@
-import logo from './logo.svg';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, useParams } from 'react-router-dom';
+import Login from './components/Login';
+import Register from './components/Register';
+import ForgotPassword from './components/ForgotPassword';
+import ResetPassword from './components/ResetPassword';
+import OgretmenPanel from './components/OgretmenPanel';
+import OgretmenProfil from './components/OgretmenProfil';
+import OgrenciPanel from './components/OgrenciPanel';
+import OgrenciAiPanel from './components/OgrenciAiPanel';
 import './App.css';
+
+const OgrenciAiPanelWrapper = () => {
+  const { studentId } = useParams();
+  // Öğrenciyi localStorage'dan oku (OgrenciProgramTab içinden kaydediliyor)
+  const stored =
+    JSON.parse(localStorage.getItem(`student_ai_${studentId}`)) ||
+    JSON.parse(localStorage.getItem(`student_${studentId}`)) ||
+    null;
+
+  const student =
+    stored || {
+      id: studentId,
+      firstName: 'Ali',
+      lastName: 'Yılmaz',
+      className: '8. Sınıf',
+      alan: 'lgs',
+      profilePhoto: null
+    };
+  
+  return <OgrenciAiPanel student={student} />;
+};
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Router>
+      <div className="App">
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/ogretmen-panel" element={<OgretmenPanel />} />
+          <Route path="/ogretmen-profil" element={<OgretmenProfil />} />
+          <Route path="/ogrenci-panel" element={<OgrenciPanel />} />
+          <Route path="/ogrenci-ai/:studentId" element={<OgrenciAiPanelWrapper />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 

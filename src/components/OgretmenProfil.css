@@ -1,0 +1,127 @@
+.teacher-profile-page {
+  background: #f2f3f5;
+  min-height: 100vh;
+}
+
+.profile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+.back-btn {
+  background: #eee;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.header-right .header-icon {
+  margin-left: 12px;
+  color: #6b7280;
+}
+
+.profile-card {
+  background: #fff;
+  margin: 16px 24px;
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #d1d5db;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-right: 16px;
+}
+
+.info .name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.name {
+  margin: 0;
+}
+
+.edit-btn {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  color: #374151;
+  gap: 8px;
+}
+
+.meta .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  display: inline-block;
+}
+
+.dashboard-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0 24px 24px;
+}
+
+.tile {
+  background: #fff;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+.tile .tile-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.tile .tile-value.large {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.tile .tile-icon {
+  font-size: 28px;
+}
+
+.tile.add .green {
+  color: #10b981;
+}
+
+.tile .highlight {
+  color: #059669;
+  font-weight: 700;
+}
+
+.tile-sub {
+  margin-top: 6px;
+  color: #6b7280;
+}
+
+

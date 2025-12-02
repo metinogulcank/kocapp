@@ -1,0 +1,264 @@
+/* Kaynaklar Ana Container */
+.kaynaklar-container {
+  background: #f8f9fa;
+  min-height: 100vh;
+  padding: 0;
+}
+
+/* Header removed: we now use page-title like Bildirimler */
+
+/* Filter Section */
+.filter-section {
+  background: #ffffff;
+  padding: 30px;
+  margin: 0 30px 30px 30px;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+}
+
+.filter-dropdowns {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-select {
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 15px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #ffffff;
+  color: #374151;
+  outline: none;
+  transition: border-color 0.3s ease;
+  cursor: pointer;
+}
+
+.filter-select:focus {
+  border-color: #6a1b9a;
+  box-shadow: 0 0 0 3px rgba(106, 27, 154, 0.1);
+}
+
+.filter-select:hover {
+  border-color: #6a1b9a;
+}
+
+.filter-button {
+  background: linear-gradient(135deg, #6a1b9a, #7b52ab);
+  color: #ffffff;
+  border: none;
+  padding: 12px 30px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-button:hover {
+  background: linear-gradient(135deg, #5a1a8a, #6b429b);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(106, 27, 154, 0.3);
+}
+
+/* Resources Content */
+.resources-content {
+  padding: 0 30px 30px 30px;
+}
+
+.resources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 25px;
+}
+
+.resource-card {
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.resource-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: #6a1b9a;
+}
+
+.resource-image {
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resource-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.resource-card:hover .resource-image img {
+  transform: scale(1.05);
+}
+
+.resource-info {
+  padding: 20px;
+}
+
+.resource-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.resource-author,
+.resource-publisher {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0 0 8px 0;
+}
+
+.resource-meta {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
+}
+
+.resource-class,
+.resource-level {
+  background: #f3f4f6;
+  color: #6a1b9a;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.resource-level {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.resource-price {
+  font-size: 20px;
+  font-weight: 700;
+  color: #6a1b9a;
+  margin-top: 15px;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #6b7280;
+}
+
+.empty-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 10px 0;
+}
+
+.empty-state p {
+  font-size: 16px;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .resources-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  
+  .filter-dropdowns {
+    flex-direction: column;
+  }
+  
+  .filter-select {
+    min-width: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .kaynaklar-container {
+    padding: 0;
+  }
+  
+  .filter-section {
+    margin: 0 20px 20px 20px;
+    padding: 20px;
+  }
+  
+  .resources-content {
+    padding: 0 20px 20px 20px;
+  }
+  
+  .resources-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .banner-icons {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-banner {
+    padding: 20px 15px;
+  }
+  
+  .banner-title {
+    font-size: 28px;
+  }
+  
+  .filter-section {
+    margin: 0 15px 15px 15px;
+    padding: 15px;
+  }
+  
+  .resources-content {
+    padding: 0 15px 15px 15px;
+  }
+  
+  .resource-info {
+    padding: 15px;
+  }
+  
+  .resource-title {
+    font-size: 16px;
+  }
+  
+  .resource-price {
+    font-size: 18px;
+  }
+}

@@ -1,0 +1,19 @@
+RewriteEngine On
+
+# CORS headers
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+
+# Handle preflight requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]
+
+# API routes
+RewriteRule ^api/register$ api/register.php [L]
+RewriteRule ^api/login$ api/login.php [L]
+RewriteRule ^api/logout$ api/logout.php [L]
+RewriteRule ^api/me$ api/me.php [L]
+
+# Error handling
+ErrorDocument 404 /api/404.php
