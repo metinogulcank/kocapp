@@ -1802,33 +1802,37 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
           {endTime ? ` - ${endTime}` : ''}
         </div>
         <div className="program-item-subject">
-          {(() => {
-            const iconSrc = getSubjectIcon(ders);
-            return iconSrc ? (
-              <img 
-                src={iconSrc} 
-                alt="" 
-                className="program-item-ders-icon"
-                onError={(e) => {
-                  console.error('Görsel yüklenemedi:', iconSrc, ders);
-                  e.target.style.display = 'none';
-                }}
-              />
-            ) : null;
-          })()}
-          <span className="program-item-ders">{ders}</span>
-          {konu && <span className="program-item-konu"> - {konu}</span>}
+          <div className="program-item-ders-row">
+            {(() => {
+              const iconSrc = getSubjectIcon(ders);
+              return iconSrc ? (
+                <img 
+                  src={iconSrc} 
+                  alt="" 
+                  className="program-item-ders-icon"
+                  onError={(e) => {
+                    console.error('Görsel yüklenemedi:', iconSrc, ders);
+                    e.target.style.display = 'none';
+                  }}
+                />
+              ) : null;
+            })()}
+            <span className="program-item-ders">{ders}</span>
+          </div>
+          {konu && <span className="program-item-konu">{konu}</span>}
         </div>
         <div className="program-item-details">
           <div className="program-item-type">
-            <span className="program-item-type-title">
-              {isRoutine ? 'Rutin · ' : ''}
-              {programTipi === 'deneme'
-                ? 'Deneme'
-                : programTipi === 'konu_anlatim'
-                ? 'Konu Anlatımı'
-                : 'Soru Çözümü'}
-            </span>
+            <div className="program-item-type-title">
+              <span>
+                {isRoutine ? 'Rutin · ' : ''}
+                {programTipi === 'deneme'
+                  ? 'Deneme'
+                  : programTipi === 'konu_anlatim'
+                  ? 'Konu Anlatımı'
+                  : 'Soru Çözümü'}
+              </span>
+            </div>
             {soruSayisi && (
               <span className="program-item-type-count">{soruSayisi} soru</span>
             )}
@@ -2259,7 +2263,9 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                               {startTime}
                               {endTime ? ` - ${endTime}` : ''}
                             </div>
-                              <div className="program-item-actions">
+                              
+                          </div>
+                          <div className="program-item-actions">
                               {!isRoutine && (
                                 <>
                                 <button
@@ -2301,27 +2307,27 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                   <FontAwesomeIcon icon={faTrash} />
                                 </button>
                               </div>
-                          </div>
-
                           {/* Subject - Topic */}
                           <div className="program-item-subject">
-                            {(() => {
-                              const iconSrc = getSubjectIcon(prog.ders);
-                              return iconSrc ? (
-                                <img 
-                                  src={iconSrc} 
-                                  alt="" 
-                                  className="program-item-ders-icon"
-                                  onError={(e) => {
-                                    console.error('Görsel yüklenemedi:', iconSrc, prog.ders);
-                                    e.target.style.display = 'none';
-                                  }}
-                                />
-                              ) : null;
-                            })()}
-                            <span className="program-item-ders">{prog.ders}</span>
+                            <div className="program-item-ders-row">
+                              {(() => {
+                                const iconSrc = getSubjectIcon(prog.ders);
+                                return iconSrc ? (
+                                  <img 
+                                    src={iconSrc} 
+                                    alt="" 
+                                    className="program-item-ders-icon"
+                                    onError={(e) => {
+                                      console.error('Görsel yüklenemedi:', iconSrc, prog.ders);
+                                      e.target.style.display = 'none';
+                                    }}
+                                  />
+                                ) : null;
+                              })()}
+                              <span className="program-item-ders">{prog.ders}</span>
+                            </div>
                             {prog.konu && (
-                              <span className="program-item-konu"> - {prog.konu}</span>
+                              <span className="program-item-konu">{prog.konu}</span>
                             )}
                           </div>
 
@@ -2333,7 +2339,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                               </span>
                             </div>
                             {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (
-                              <span className="program-item-type-count"> - {prog.soru_sayisi} soru</span>
+                              <span className="program-item-type-count">{prog.soru_sayisi} soru</span>
                             )}
                           </div>
 
@@ -2365,7 +2371,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                 : status === 'eksik_yapildi'
                                 ? '⚠ Eksik Yapıldı'
                                 : '✗ Yapılmadı';
-                            const displayLabel = isRoutine ? `Rutin · ${statusLabel}` : statusLabel;
+                            const displayLabel = isRoutine ? `${statusLabel}` : statusLabel;
 
                             return (
                               <div className="program-item-status-wrapper">

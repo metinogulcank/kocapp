@@ -380,11 +380,24 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.calendar-body > * {
+  min-width: 0;
 }
 
 .day-column {
   position: relative;
   min-height: 840px; /* 14 saat * 60px */
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .day-column:last-child {
@@ -395,6 +408,10 @@
   position: relative;
   z-index: 10;
   padding: 8px;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .program-item {
@@ -404,6 +421,9 @@
   font-size: 12px;
   cursor: move;
   margin-bottom: 8px;
+  margin-top: 0;
+  margin-left: 0;
+  margin-right: 0;
   transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
@@ -411,6 +431,12 @@
   z-index: 10;
   gap: 8px;
   overflow: visible;
+  width: calc(100% - 16px);
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  flex-shrink: 0;
+  align-self: stretch;
   /* Liquid Glass Effect - Daha belirgin saydamlık */
   backdrop-filter: blur(20px) saturate(200%);
   -webkit-backdrop-filter: blur(20px) saturate(200%);
@@ -419,6 +445,16 @@
               inset 0 1px 0 rgba(255, 255, 255, 0.3),
               inset 0 -1px 0 rgba(255, 255, 255, 0.1);
   /* Gradient background is set inline via style prop */
+}
+
+/* Butonların üzerinde cursor'u pointer yap */
+.program-item .program-item-actions,
+.program-item .program-item-actions * {
+  cursor: pointer !important;
+}
+
+.program-item .program-item-actions:hover {
+  cursor: pointer !important;
 }
 
 /* Kartların sağ üstünde yumuşak, parlak bir dairesel şekil */
@@ -455,8 +491,15 @@
 }
 
 .program-item[draggable="true"]:active {
-  opacity: 0.5;
+  opacity: 0.7;
   cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.program-item[draggable="true"] {
+  width: 100%!important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 .program-item.program-item-status-open {
@@ -466,24 +509,30 @@
 .program-item-header {
   display: block;
   margin-bottom: 6px;
-  padding-right: 54px;
+  padding-right: 48px;
 }
 
 .program-item-actions {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 4px;
+  right: 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   pointer-events: auto;
+  z-index: 200;
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 40px;
+  touch-action: manipulation;
 }
 
 .program-item-type {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   font-weight: 600;
   font-size: 13px;
   opacity: 0.95;
@@ -493,10 +542,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
 }
 
 .program-item-type-count {
   font-weight: 500;
+  font-size: 12px;
+  opacity: 0.9;
 }
 
 .program-item-type svg {
@@ -506,33 +558,78 @@
 .edit-program-btn,
 .copy-program-btn,
 .delete-program-btn {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
   border: none;
   color: white;
+  min-width: 32px;
+  min-height: 32px;
   width: 32px;
   height: 32px;
-  padding: 4px;
-  border-radius: 4px;
-  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer !important;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
   pointer-events: auto;
-  z-index: 5;
+  z-index: 201;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  position: relative;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
 }
 
-.edit-program-btn:hover {
-  background: rgba(59, 130, 246, 0.8);
+.edit-program-btn *,
+.copy-program-btn *,
+.delete-program-btn * {
+  pointer-events: none;
+  flex-shrink: 0;
 }
 
-.copy-program-btn:hover {
-  background: rgba(16, 185, 129, 0.8);
+.edit-program-btn::before,
+.copy-program-btn::before,
+.delete-program-btn::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  z-index: -1;
 }
 
-.delete-program-btn:hover {
-  background: rgba(239, 68, 68, 0.8);
+.edit-program-btn:hover,
+.edit-program-btn:active {
+  background: rgba(59, 130, 246, 0.95);
+  transform: scale(1.05);
+  cursor: pointer !important;
+  box-shadow: 0 3px 6px rgba(59, 130, 246, 0.4);
+  z-index: 202;
+}
+
+.copy-program-btn:hover,
+.copy-program-btn:active {
+  background: rgba(16, 185, 129, 0.95);
+  transform: scale(1.05);
+  cursor: pointer !important;
+  box-shadow: 0 3px 6px rgba(16, 185, 129, 0.4);
+  z-index: 202;
+}
+
+.delete-program-btn:hover,
+.delete-program-btn:active {
+  background: rgba(239, 68, 68, 0.95);
+  transform: scale(1.05);
+  cursor: pointer !important;
+  box-shadow: 0 3px 6px rgba(239, 68, 68, 0.4);
+  z-index: 202;
 }
 
 .program-item-time {
@@ -545,9 +642,16 @@
 
 .program-item-subject {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.program-item-ders-row {
+  display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 2px;
 }
 
 .program-item-ders-icon {
@@ -569,6 +673,9 @@
   font-size: 12px;
   opacity: 0.85;
   font-weight: 400;
+  margin-left: 0;
+  display: block;
+  width: 100%;
 }
 
 .program-item-details {
@@ -1765,5 +1872,182 @@
 
 .topic-analysis-modal-resize:hover {
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* 13'' MacBook ve küçük ekranlar için responsive iyileştirmeler */
+@media (max-width: 1440px) {
+  .program-header {
+    padding: 12px 4px;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .program-actions {
+    gap: 2px;
+  }
+
+  .program-action-btn {
+    padding: 8px 12px;
+    font-size: 10px;
+    min-height: 40px;
+  }
+
+  .week-range {
+    font-size: 10px;
+  }
+  .nav-btn{
+    font-size: 10px;
+    width: 24px;
+    height: 30px;
+  }
+  .nav-btn:hover{
+    background: #f3f4f6;
+    color: #374151;
+  }
+  .calendar-header {
+    font-size: 10px;
+  }
+
+  .day-header {
+    padding: 10px 8px;
+  }
+
+  .day-name,
+  .day-number {
+    font-size: 12px;
+  }
+
+  .program-item {
+    padding: 10px;
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+
+  .program-item-time {
+    font-size: 14px;
+  }
+
+  .program-item-ders {
+    font-size: 12px;
+  }
+
+  .program-item-konu {
+    font-size: 11px;
+  }
+
+  .program-item-actions {
+    top: 4px;
+    right: 4px;
+    gap: 4px;
+  }
+
+  .edit-program-btn,
+  .copy-program-btn,
+  .delete-program-btn {
+    min-width: 16px;
+    min-height: 16px;
+    width: 24px;
+    height: 24px;
+    font-size: 8px;
+    padding: 4px;
+  }
+
+  .program-item-actions {
+    min-width: 38px;
+    padding: 0;
+    gap: 3px;
+    right: 0;
+    top: 4px;
+  }
+
+  .program-item-header {
+    padding-right: 46px;
+  }
+
+  .program-item {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .program-item-header {
+    padding-right: 0;
+    margin-bottom: 0;
+  }
+  .week-navigation{
+    gap: 5px;
+    font-size: 10px;
+  }
+  .programs-list {
+    padding: 6px;
+  }
+
+  .day-column {
+    min-height: 800px;
+  }
+  .program-item-durum span{
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .program-header {
+    padding: 10px 14px;
+  }
+
+  .program-action-btn {
+    padding: 6px 10px;
+    font-size: 9px;
+    min-height: 36px;
+  }
+
+  .program-actions {
+    gap: 6px;
+  }
+
+  .calendar-body {
+    min-height: calc(100vh - 240px);
+  }
+
+  .day-column {
+    min-height: 720px;
+  }
+
+  .program-item {
+    padding: 8px;
+    font-size: 10px;
+  }
+
+  .program-item-time {
+    font-size: 13px;
+  }
+
+  .program-item-ders {
+    font-size: 11px;
+  }
+
+  .program-item-konu {
+    font-size: 10px;
+  }
+
+  .program-item-actions {
+    top: 6px;
+    right: 6px;
+    gap: 4px;
+  }
+
+  .edit-program-btn,
+  .copy-program-btn,
+  .delete-program-btn {
+    min-width: 34px;
+    min-height: 34px;
+    width: 34px;
+    height: 34px;
+    padding: 5px;
+    font-size: 11px;
+  }
+
+  .program-item-header {
+    padding-right: 48px;
+  }
 }
 
