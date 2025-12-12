@@ -76,7 +76,7 @@
   background: white;
   border: 2px solid #764ba2;
   border-radius: 12px;
-  padding: 25px;
+  padding: 8px;
   text-align: center;
   transition: all 0.3s ease;
   cursor: pointer;
@@ -90,20 +90,18 @@
 
 .card-icon {
   font-size: 48px;
-  margin-bottom: 15px;
 }
 
 .dashboard-card h3 {
   color: #333;
-  margin-bottom: 10px;
-  font-size: 20px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .dashboard-card p {
   color: #666;
   margin-bottom: 20px;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.5;
 }
 

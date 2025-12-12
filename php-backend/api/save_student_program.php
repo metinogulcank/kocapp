@@ -27,6 +27,7 @@ try {
     $routineId = $data['routineId'] ?? null;
     $kaynak = $data['kaynak'] ?? null;
     $aciklama = $data['aciklama'] ?? null;
+    $youtubeLinki = $data['youtubeLinki'] ?? null;
     $soruSayisi = $data['soruSayisi'] ?? null;
     $baslangicSaati = $data['baslangicSaati'] ?? null;
     $bitisSaati = $data['bitisSaati'] ?? null;
@@ -44,8 +45,8 @@ try {
     $id = bin2hex(random_bytes(12));
 
     $query = "INSERT INTO ogrenci_programlari 
-              (id, ogrenci_id, ogretmen_id, routine_id, tarih, baslangic_saati, bitis_saati, program_tipi, ders, konu, kaynak, aciklama, soru_sayisi, durum) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+              (id, ogrenci_id, ogretmen_id, routine_id, tarih, baslangic_saati, bitis_saati, program_tipi, ders, konu, kaynak, aciklama, youtube_linki, soru_sayisi, durum) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     
     $stmt = $db->prepare($query);
     $stmt->execute([
@@ -61,6 +62,7 @@ try {
         $konu,
         $kaynak,
         $aciklama,
+        $youtubeLinki,
         $soruSayisi,
         $durum
     ]);

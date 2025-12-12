@@ -56,6 +56,24 @@ $alan = $data->alan;
 $profilePhoto = !empty($data->profilePhoto) ? $data->profilePhoto : null;
 $passwordHash = password_hash($data->password, PASSWORD_DEFAULT);
 $teacherId = $data->teacherId;
+$meetingDayRaw = isset($data->meetingDay) ? intval($data->meetingDay) : 1;
+$meetingDay = ($meetingDayRaw >= 1 && $meetingDayRaw <= 7) ? $meetingDayRaw : 1;
+
+// Görüşme tarihi (YYYY-MM-DD). Geçerli bir tarih değilse NULL kalır.
+$meetingDate = null;
+if (!empty($data->meetingDate)) {
+    $ts = strtotime($data->meetingDate);
+    if ($ts !== false) {
+        $meetingDate = date('Y-m-d', $ts);
+        // meetingDay belirtilmemişse tarihten türet
+        if ($meetingDayRaw === 1 && empty($data->meetingDay)) {
+            $dow = (int)date('N', $ts); // 1 (Pzt) - 7 (Paz)
+            if ($dow >= 1 && $dow <= 7) {
+                $meetingDay = $dow;
+            }
+        }
+    }
+}
 
 // Eğer fotoğraf URL'si geçici klasördeyse, öğrenci ID'sine taşı
 if (!empty($profilePhoto) && strpos($profilePhoto, '/students/temp_') !== false) {
@@ -95,10 +113,10 @@ if (!empty($profilePhoto) && strpos($profilePhoto, '/students/temp_') !== false)
     }
 }
 
-$query = "INSERT INTO ogrenciler (id, firstName, lastName, email, phone, className, alan, profilePhoto, passwordHash, teacherId, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+$query = "INSERT INTO ogrenciler (id, firstName, lastName, email, phone, className, alan, profilePhoto, passwordHash, teacherId, meetingDay, meetingDate, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 $stmt = $db->prepare($query);
-$params = [$id, $firstName, $lastName, $email, $phone, $className, $alan, $profilePhoto, $passwordHash, $teacherId];
+$params = [$id, $firstName, $lastName, $email, $phone, $className, $alan, $profilePhoto, $passwordHash, $teacherId, $meetingDay, $meetingDate];
 $success = $stmt->execute($params);
 
 if ($success) {

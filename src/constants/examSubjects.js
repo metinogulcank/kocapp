@@ -2,10 +2,9 @@ export const EXAM_CATEGORY_OPTIONS = [
   {
     label: 'YKS',
     options: [
-      { value: 'yks_tyt', label: 'TYT' },
-      { value: 'yks_say', label: 'Sayısal (SAY)' },
-      { value: 'yks_ea', label: 'Eşit Ağırlık (EA)' },
-      { value: 'yks_soz', label: 'Sözel (SÖZ)' }
+      { value: 'yks_say', label: 'YKS Sayısal' },
+      { value: 'yks_ea', label: 'YKS Eşit Ağırlık' },
+      { value: 'yks_soz', label: 'YKS Sözel' }
     ]
   },
   {
@@ -22,33 +21,58 @@ export const EXAM_CATEGORY_OPTIONS = [
   }
 ];
 
+const TYT_DERSLERI = [
+  'TYT Türkçe',
+  'TYT Matematik',
+  'TYT Geometri',
+  'TYT Fizik',
+  'TYT Kimya',
+  'TYT Biyoloji',
+  'TYT Tarih',
+  'TYT Coğrafya',
+  'TYT Felsefe',
+  'TYT Din Kültürü ve Ahlak Bilgisi'
+];
+
+// AYT dersleri (alan bazlı)
+const AYT_SAY_DERSLERI = [
+  'AYT Matematik',
+  'AYT Geometri',
+  'AYT Fizik',
+  'AYT Kimya',
+  'AYT Biyoloji'
+];
+
+const AYT_EA_DERSLERI = [
+  'AYT Matematik',
+  'AYT Geometri',
+  'AYT Türk Dili ve Edebiyatı',
+  'AYT Tarih-1',
+  'AYT Coğrafya-1'
+];
+
+const AYT_SOZ_DERSLERI = [
+  'AYT Türk Dili ve Edebiyatı',
+  'AYT Tarih-1',
+  'AYT Coğrafya-1',
+  'AYT Tarih-2',
+  'AYT Coğrafya-2',
+  'AYT Felsefe Grubu',
+  'AYT Psikoloji',
+  'AYT Sosyoloji',
+  'AYT Mantık',
+  'AYT Din Kültürü ve Ahlak Bilgisi'
+];
+
 export const EXAM_SUBJECTS_BY_AREA = {
-  yks_tyt: [
-    'Türkçe',
-    'Matematik',
-    'Geometri',
-    'Fizik',
-    'Kimya',
-    'Biyoloji',
-    'Tarih',
-    'Coğrafya',
-    'Felsefe',
-    'Din Kültürü ve Ahlak Bilgisi'
-  ],
-  yks_say: ['Matematik', 'Geometri', 'Fizik', 'Kimya', 'Biyoloji'],
-  yks_ea: ['Matematik', 'Geometri', 'Türk Dili ve Edebiyatı', 'Tarih-1', 'Coğrafya-1'],
-  yks_soz: [
-    'Türk Dili ve Edebiyatı',
-    'Tarih-1',
-    'Coğrafya-1',
-    'Tarih-2',
-    'Coğrafya-2',
-    'Felsefe Grubu',
-    'Psikoloji',
-    'Sosyoloji',
-    'Mantık',
-    'Din Kültürü ve Ahlak Bilgisi'
-  ],
+  // YKS Sayısal: TYT + AYT Sayısal dersleri
+  yks_say: [...TYT_DERSLERI, ...AYT_SAY_DERSLERI],
+  // YKS Eşit Ağırlık: TYT + AYT EA dersleri
+  yks_ea: [...TYT_DERSLERI, ...AYT_EA_DERSLERI],
+  // YKS Sözel: TYT + AYT Sözel dersleri
+  yks_soz: [...TYT_DERSLERI, ...AYT_SOZ_DERSLERI],
+  // Geriye dönük uyumluluk için eski değerler (deprecated)
+  yks_tyt: TYT_DERSLERI,
   lgs: [
     'Türkçe',
     'Matematik',

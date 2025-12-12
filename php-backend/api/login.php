@@ -58,6 +58,16 @@ if(!empty($data->email) && !empty($data->password)) {
                 'firstName' => $student['firstName'],
                 'lastName' => $student['lastName']
             );
+            
+            // Öğrenci çevrimiçi durumunu güncelle
+            try {
+                $updateOnline = "UPDATE ogrenciler SET online_status = 1, son_giris_tarihi = NOW() WHERE id = ?";
+                $updateStmt = $db->prepare($updateOnline);
+                $updateStmt->execute([$student['id']]);
+            } catch (Exception $e) {
+                // Hata olsa bile login devam etsin
+                error_log("Online status update error: " . $e->getMessage());
+            }
         }
     }
     

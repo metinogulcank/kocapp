@@ -5,6 +5,9 @@ const API_GET = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_teach
 const API_UPDATE = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_teacher_profile.php";
 const API_PHOTO = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/upload_teacher_photo.php";
 const API_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/create_student.php";
+const API_UPDATE_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student.php";
+const API_DELETE_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_student.php";
+const API_GET_STUDENTS = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_teacher_students.php";
 
 // Türkçe doğru title-case için
 function turkishTitle(str = '') {
@@ -45,6 +48,8 @@ export default function OgretmenProfilTab() {
     phone: '',
     className: '',
     profilePhoto: '',
+    // Öğrencinin ilk görüşme / başlangıç tarihi
+    meetingDate: '',
     password: '',
     passwordConfirm: ''
   });
@@ -52,6 +57,31 @@ export default function OgretmenProfilTab() {
   const [addError, setAddError] = useState('');
   const [addSuccess, setAddSuccess] = useState('');
   const [stuUploading, setStuUploading] = useState(false);
+
+  // Öğrenci listesi için state
+  const [showStudentListModal, setShowStudentListModal] = useState(false);
+  const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [showEditStudentModal, setShowEditStudentModal] = useState(false);
+  const [editStudentForm, setEditStudentForm] = useState({
+    id: '',
+    alan: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    className: '',
+    profilePhoto: '',
+    meetingDate: '',
+    password: '',
+    passwordConfirm: ''
+  });
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+  const [updateSuccess, setUpdateSuccess] = useState('');
+  const [editStuUploading, setEditStuUploading] = useState(false);
+  const [deletingStudentId, setDeletingStudentId] = useState(null);
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -131,7 +161,8 @@ export default function OgretmenProfilTab() {
     e.preventDefault();
     setAddError(''); setAddSuccess('');
     if (!studentForm.firstName || !studentForm.lastName ||
-        !studentForm.email || !studentForm.className || !studentForm.alan || !studentForm.password) {
+        !studentForm.email || !studentForm.className || !studentForm.alan || !studentForm.password ||
+        !studentForm.meetingDate) {
       setAddError('Tüm zorunlu alanları doldurun!');
       return;
     }
@@ -155,14 +186,172 @@ export default function OgretmenProfilTab() {
       if (!res.ok) throw new Error(data.message || 'İşlem başarısız');
       setAddSuccess('Öğrenci kaydedildi!');
       setStudentForm({
-        alan: '', firstName: '', lastName: '', email: '', phone: '', className: '', profilePhoto: '', password: '', passwordConfirm: ''
+        alan: '',
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        className: '',
+        profilePhoto: '',
+        meetingDate: '',
+        password: '',
+        passwordConfirm: ''
       });
       setShowAddStudentModal(false);
+      // Öğrenci listesini yenile
+      if (showStudentListModal) {
+        fetchStudents();
+      }
     } catch (err) {
       setAddError(err.message);
     }
     setAdding(false);
   }
+
+  // Öğrencileri getir
+  const fetchStudents = () => {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user || !user.id) return;
+    setStudentsLoading(true);
+    fetch(`${API_GET_STUDENTS}?teacherId=${user.id}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.students) {
+          setStudents(data.students);
+        }
+        setStudentsLoading(false);
+      })
+      .catch(err => {
+        console.error('Öğrenciler yüklenemedi:', err);
+        setStudentsLoading(false);
+      });
+  };
+
+  // Öğrenci listesi modalını aç
+  const handleOpenStudentList = () => {
+    setShowStudentListModal(true);
+    fetchStudents();
+  };
+
+  // Öğrenci düzenleme modalını aç
+  const handleEditStudent = (student) => {
+    setEditingStudent(student);
+    setEditStudentForm({
+      id: student.id,
+      alan: student.alan || '',
+      firstName: student.firstName || '',
+      lastName: student.lastName || '',
+      email: student.email || '',
+      phone: student.phone || '',
+      className: student.className || '',
+      profilePhoto: student.profilePhoto || '',
+      meetingDate: student.meetingDate ? student.meetingDate.split('T')[0] : '',
+      password: '',
+      passwordConfirm: ''
+    });
+    setShowEditStudentModal(true);
+    setUpdateError('');
+    setUpdateSuccess('');
+  };
+
+  // Öğrenci düzenleme form değişikliği
+  function handleEditStudentFormChange(e) {
+    const { name, value } = e.target;
+    setEditStudentForm(f => ({ ...f, [name]: value }));
+  }
+
+  // Öğrenci düzenleme fotoğraf yükleme
+  async function handleEditStudentPhotoUpload(e) {
+    setEditStuUploading(true); setUpdateError(''); setUpdateSuccess('');
+    const file = e.target.files[0]; if (!file) return;
+    const formData = new FormData();
+    formData.append('photo', file);
+    formData.append('_id', editingStudent.id);
+    formData.append('type', 'student');
+    try {
+      const res = await fetch(API_PHOTO, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.message || 'Yükleme hatası!');
+      setEditStudentForm(f => ({ ...f, profilePhoto: data.url }));
+      setUpdateSuccess('Fotoğraf yüklendi!');
+    } catch (err) {
+      setUpdateError('Fotoğraf yüklenemedi: ' + err.message);
+    } finally { setEditStuUploading(false); }
+  }
+
+  // Öğrenci güncelleme
+  async function handleUpdateStudent(e) {
+    e.preventDefault();
+    setUpdateError(''); setUpdateSuccess('');
+    if (!editStudentForm.firstName || !editStudentForm.lastName ||
+        !editStudentForm.email || !editStudentForm.className || !editStudentForm.alan) {
+      setUpdateError('Tüm zorunlu alanları doldurun!');
+      return;
+    }
+    if (editStudentForm.password && editStudentForm.password !== editStudentForm.passwordConfirm) {
+      setUpdateError('Şifreler eşleşmiyor!');
+      return;
+    }
+    const user = JSON.parse(localStorage.getItem('user'));
+    setUpdating(true);
+    const payload = {
+      id: editStudentForm.id,
+      teacherId: user.id,
+      firstName: editStudentForm.firstName,
+      lastName: editStudentForm.lastName,
+      email: editStudentForm.email,
+      phone: editStudentForm.phone,
+      className: editStudentForm.className,
+      alan: editStudentForm.alan,
+      profilePhoto: editStudentForm.profilePhoto,
+      meetingDate: editStudentForm.meetingDate || null
+    };
+    // Şifre sadece değiştirilmişse ekle
+    if (editStudentForm.password) {
+      payload.password = editStudentForm.password;
+    }
+    try {
+      const res = await fetch(API_UPDATE_STUDENT, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'İşlem başarısız');
+      setUpdateSuccess('Öğrenci güncellendi!');
+      setTimeout(() => {
+        setShowEditStudentModal(false);
+        setEditingStudent(null);
+        fetchStudents();
+      }, 1000);
+    } catch (err) {
+      setUpdateError(err.message);
+    }
+    setUpdating(false);
+  }
+
+  // Öğrenci silme
+  const handleDeleteStudent = async (studentId) => {
+    if (!window.confirm('Bu öğrenciyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) {
+      return;
+    }
+    const user = JSON.parse(localStorage.getItem('user'));
+    setDeletingStudentId(studentId);
+    try {
+      const res = await fetch(API_DELETE_STUDENT, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: studentId, teacherId: user.id })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Silme işlemi başarısız');
+      fetchStudents();
+    } catch (err) {
+      alert('Silme hatası: ' + err.message);
+    } finally {
+      setDeletingStudentId(null);
+    }
+  };
 
   async function handleSubmit(e) {
     e.preventDefault(); setSuccess(''); setError('');
@@ -224,7 +413,7 @@ export default function OgretmenProfilTab() {
           <div className="tile-sub">Öğrenci limitim: {form.limit} • Öğrenci sayım: {form.active}</div>
         </div>
         <div className="tile"><div className="tile-title">Öğrenci randevu alanı</div><div className="tile-icon">🗓️</div></div>
-        <div className="tile"><div className="tile-title">Öğrencileri listele</div><div className="tile-icon">📋</div></div>
+        <div className="tile" onClick={handleOpenStudentList} style={{cursor: 'pointer'}}><div className="tile-title">Öğrencileri listele</div><div className="tile-icon">📋</div></div>
         <div className="tile add" onClick={() => setShowAddStudentModal(true)}>
           <div className="tile-title green">Yeni öğrenci ekle</div>
           <div className="tile-icon">➕</div>
@@ -269,6 +458,22 @@ export default function OgretmenProfilTab() {
                       </optgroup>
                     ))}
                   </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <div>
+                  <label>Görüşme Günü (ilk seans tarihi)</label>
+                  <input
+                    name="meetingDate"
+                    type="date"
+                    value={studentForm.meetingDate}
+                    onChange={handleStudentFormChange}
+                    required
+                  />
+                  <small style={{ display: 'block', marginTop: 4, color: '#6b7280' }}>
+                    Bu tarih, haftalık programın başlangıç günü olacaktır. Örn: 03/12/2025 seçerseniz
+                    ilk hafta 03/12/2025 Çarşamba - 09/12/2025 Salı olarak ayarlanır.
+                  </small>
                 </div>
               </div>
               <div className="form-row">
@@ -354,6 +559,152 @@ export default function OgretmenProfilTab() {
               <div style={{display:'flex',justifyContent:'flex-end'}}>
                 <button type="button" className="edit-btn ghost" style={{marginRight:10}} onClick={()=>setModal(false)}>Vazgeç</button>
                 <button type="submit" className="edit-btn" disabled={saving}>{saving ? 'Kaydediliyor...' : 'Kaydet'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Öğrenci listesi modalı */}
+      {showStudentListModal && (
+        <div className="profile-modal-bg" onClick={() => setShowStudentListModal(false)}>
+          <div className="profile-modal" onClick={e=>e.stopPropagation()} style={{maxWidth: '800px', maxHeight: '90vh', overflow: 'auto'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+              <h2 style={{margin: 0}}>Öğrenciler</h2>
+              <button className="edit-btn" onClick={() => {setShowStudentListModal(false); setShowAddStudentModal(true);}}>➕ Yeni Öğrenci Ekle</button>
+            </div>
+            {studentsLoading ? (
+              <div style={{textAlign: 'center', padding: 40}}>Yükleniyor...</div>
+            ) : students.length === 0 ? (
+              <div style={{textAlign: 'center', padding: 40, color: '#6b7280'}}>Henüz öğrenci eklenmemiş.</div>
+            ) : (
+              <div style={{display: 'grid', gap: 12}}>
+                {students.map((student) => (
+                  <div key={student.id} style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 8,
+                    padding: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 16
+                  }}>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 12, flex: 1}}>
+                      {student.profilePhoto ? (
+                        <img src={student.profilePhoto} alt="" style={{width: 48, height: 48, borderRadius: 8, objectFit: 'cover'}} />
+                      ) : (
+                        <div style={{width: 48, height: 48, borderRadius: 8, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280'}}>
+                          {student.firstName?.[0] || '?'}
+                        </div>
+                      )}
+                      <div style={{flex: 1}}>
+                        <div style={{fontWeight: 600, fontSize: 16}}>{student.firstName} {student.lastName}</div>
+                        <div style={{fontSize: 14, color: '#6b7280', marginTop: 4}}>
+                          {student.email} • {student.className} • {student.alan}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{display: 'flex', gap: 8}}>
+                      <button className="edit-btn ghost" onClick={() => handleEditStudent(student)} style={{padding: '8px 16px'}}>
+                        Düzenle
+                      </button>
+                      <button 
+                        className="edit-btn" 
+                        onClick={() => handleDeleteStudent(student.id)} 
+                        disabled={deletingStudentId === student.id}
+                        style={{padding: '8px 16px', background: deletingStudentId === student.id ? '#9ca3af' : '#dc2626'}}
+                      >
+                        {deletingStudentId === student.id ? 'Siliniyor...' : 'Sil'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{marginTop: 20, display: 'flex', justifyContent: 'flex-end'}}>
+              <button type="button" className="edit-btn ghost" onClick={() => setShowStudentListModal(false)}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Öğrenci düzenleme modalı */}
+      {showEditStudentModal && editingStudent && (
+        <div className="profile-modal-bg" onClick={() => {setShowEditStudentModal(false); setEditingStudent(null);}}>
+          <div className="profile-modal" onClick={e=>e.stopPropagation()}>
+            <form className="profile-update-form" onSubmit={handleUpdateStudent}>
+              <h2 style={{marginTop: 0, marginBottom: 20}}>Öğrenci Düzenle</h2>
+              <div className="form-row">
+                <div><label>Ad</label>
+                  <input name="firstName" value={editStudentForm.firstName} onChange={handleEditStudentFormChange} required />
+                </div>
+                <div><label>Soyad</label>
+                  <input name="lastName" value={editStudentForm.lastName} onChange={handleEditStudentFormChange} required />
+                </div>
+              </div>
+              <div className="form-row">
+                <div><label>Email</label>
+                  <input name="email" type="email" value={editStudentForm.email} onChange={handleEditStudentFormChange} required />
+                </div>
+                <div><label>Telefon</label>
+                  <input name="phone" value={editStudentForm.phone} onChange={handleEditStudentFormChange} />
+                </div>
+              </div>
+              <div className="form-row">
+                <div><label>Sınıf</label>
+                  <input name="className" value={editStudentForm.className} onChange={handleEditStudentFormChange} required />
+                </div>
+                <div><label>Alan</label>
+                  <select name="alan" value={editStudentForm.alan} onChange={handleEditStudentFormChange} required>
+                    <option value="">Seçiniz</option>
+                    {EXAM_CATEGORY_OPTIONS.map((group) => (
+                      <optgroup key={group.label} label={`SINAVLAR · ${group.label}`}>
+                        {group.options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <div>
+                  <label>Görüşme Günü (ilk seans tarihi)</label>
+                  <input
+                    name="meetingDate"
+                    type="date"
+                    value={editStudentForm.meetingDate}
+                    onChange={handleEditStudentFormChange}
+                  />
+                  <small style={{ display: 'block', marginTop: 4, color: '#6b7280' }}>
+                    Bu tarih, haftalık programın başlangıç günü olacaktır.
+                  </small>
+                </div>
+              </div>
+              <div className="form-row">
+                <div><label>Fotoğraf</label>
+                  <input name="photoFile" type="file" accept="image/*" onChange={handleEditStudentPhotoUpload} />
+                  {editStuUploading && <span style={{color:'#8e24aa'}}>Yükleniyor...</span>}
+                  {editStudentForm.profilePhoto && <img src={editStudentForm.profilePhoto} alt="" style={{maxWidth: 48, borderRadius: 8, marginTop: 6}} />}
+                </div>
+              </div>
+              <div className="form-row">
+                <div>
+                  <label>Yeni Şifre (değiştirmek istemiyorsanız boş bırakın)</label>
+                  <input name="password" value={editStudentForm.password} onChange={handleEditStudentFormChange} type="password" autoComplete="new-password" />
+                </div>
+                <div>
+                  <label>Şifre Tekrar</label>
+                  <input name="passwordConfirm" value={editStudentForm.passwordConfirm} onChange={handleEditStudentFormChange} type="password" autoComplete="new-password" />
+                </div>
+              </div>
+              {updateError && <div style={{ color: '#b91c1c', marginTop: 10 }}>{updateError}</div>}
+              {updateSuccess && <div style={{ color: '#16a34a', marginTop: 10 }}>{updateSuccess}</div>}
+              <div style={{display:'flex',justifyContent:'flex-end'}}>
+                <button type="button" className="edit-btn ghost" style={{marginRight:10}} onClick={() => {setShowEditStudentModal(false); setEditingStudent(null);}}>Vazgeç</button>
+                <button type="submit" className="edit-btn" disabled={updating}>{updating ? 'Güncelleniyor...' : 'Güncelle'}</button>
               </div>
             </form>
           </div>

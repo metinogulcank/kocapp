@@ -329,14 +329,14 @@
 }
 
 .day-header {
-  padding: 12px;
+  padding: 12px 8px;
   text-align: center;
   border-right: 1px solid rgba(255, 255, 255, 0.2);
   display: flex;
-  flex-direction: row-reverse;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .day-header:last-child {
@@ -359,6 +359,15 @@
   align-items: baseline;
   justify-content: center;
   gap: 4px;
+}
+
+.day-progress-chart {
+  opacity: 0.9;
+  transition: opacity 0.2s ease;
+}
+
+.day-progress-chart:hover {
+  opacity: 1;
 }
 
 .calendar-body-wrapper {
@@ -431,9 +440,9 @@
   z-index: 10;
   gap: 8px;
   overflow: visible;
-  width: calc(100% - 16px);
+  width: 100%;
   min-width: 0;
-  max-width: calc(100% - 16px);
+  max-width: 100%;
   box-sizing: border-box;
   flex-shrink: 0;
   align-self: stretch;
@@ -1881,7 +1890,16 @@
     flex-wrap: nowrap;
     gap: 4px;
   }
-
+  .inline-form-actions .cancel-btn,
+.inline-form-actions .save-btn {
+  padding: 8px;
+  font-size: 10px;
+}
+  .inline-form-row{
+    flex-direction: column;
+    gap: 4px;
+    display: flex !important;
+  }
   .program-actions {
     gap: 2px;
   }

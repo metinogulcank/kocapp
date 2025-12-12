@@ -27,6 +27,7 @@ try {
     $konu = $data['konu'] ?? null;
     $kaynak = $data['kaynak'] ?? null;
     $aciklama = $data['aciklama'] ?? null;
+    $youtubeLinki = $data['youtubeLinki'] ?? null;
     $soruSayisi = $data['soruSayisi'] ?? null;
     $baslangicSaati = $data['baslangicSaati'] ?? null;
     $bitisSaati = $data['bitisSaati'] ?? null;
@@ -50,7 +51,7 @@ try {
     }
 
     $query = "UPDATE ogrenci_programlari 
-              SET tarih = ?, baslangic_saati = ?, bitis_saati = ?, program_tipi = ?, ders = ?, konu = ?, kaynak = ?, aciklama = ?, soru_sayisi = ?, durum = ? 
+              SET tarih = ?, baslangic_saati = ?, bitis_saati = ?, program_tipi = ?, ders = ?, konu = ?, kaynak = ?, aciklama = ?, youtube_linki = ?, soru_sayisi = ?, durum = ? 
               WHERE id = ?";
     
     $stmt = $db->prepare($query);
@@ -63,6 +64,7 @@ try {
         $konu,
         $kaynak,
         $aciklama,
+        $youtubeLinki,
         $soruSayisi,
         $durum,
         $programId

@@ -304,6 +304,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
     konu: '',
     kaynak: '',
     aciklama: '',
+    hasYoutubeLinki: false,
+    youtubeLinki: '',
     soruSayisi: '',
     baslangicSaati: '',
     bitisSaati: '',
@@ -402,12 +404,57 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
     }
   }, [showTopicAnalysisModal, studentSubjects, topicAnalysisSubject]);
 
-  // Haftanın günlerini hesapla (Pazartesi'den başlayarak)
+  const preferredWeekStart = useMemo(() => {
+    const raw =
+      student?.meetingDay ??
+      student?.meeting_day ??
+      student?.gorusmeGunu ??
+      student?.gorusme_gunu;
+    const parsed = parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 7) {
+      return parsed;
+    }
+    return 1;
+  }, [student]);
+
+  // Öğrencinin görüşme tarihi (varsa tam tarih)
+  const meetingStartDate = useMemo(() => {
+    const raw = student?.meetingDate ?? student?.meeting_date ?? null;
+    if (!raw) return null;
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }, [student]);
+
+  // Öğrenci değiştiğinde haftayı görüşme tarihine hizala
+  useEffect(() => {
+    if (meetingStartDate) {
+      setCurrentWeek(meetingStartDate);
+    } else {
+      setCurrentWeek(new Date());
+    }
+  }, [meetingStartDate, student?.id]);
+
+  // Haftanın günlerini hesapla (öğrencinin görüşme gününü baz alarak)
   const weekDays = useMemo(() => {
     const startOfWeek = new Date(currentWeek);
-    const day = startOfWeek.getDay();
-    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Pazartesi'ye ayarla
-    startOfWeek.setDate(diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    // Eğer tam görüşme tarihi varsa, haftayı doğrudan o günden başlat
+    if (meetingStartDate) {
+      const base = new Date(startOfWeek);
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(base);
+        date.setDate(base.getDate() + i);
+        days.push(date);
+      }
+      return days;
+    }
+
+    // Aksi halde, tercih edilen haftabaşı gününe (örneğin Pazartesi) hizala
+    const currentJsDay = startOfWeek.getDay() === 0 ? 7 : startOfWeek.getDay();
+    const diff = preferredWeekStart - currentJsDay;
+    startOfWeek.setDate(startOfWeek.getDate() + diff);
     
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -416,7 +463,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       days.push(date);
     }
     return days;
-  }, [currentWeek]);
+  }, [currentWeek, preferredWeekStart, meetingStartDate]);
 
   const weekStartIso = useMemo(() => {
     if (!weekDays.length) return null;
@@ -632,6 +679,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       konu: '',
       kaynak: '',
       aciklama: '',
+      hasYoutubeLinki: false,
+      youtubeLinki: '',
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
@@ -665,6 +714,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       konu: '',
       kaynak: '',
       aciklama: '',
+      hasYoutubeLinki: false,
+      youtubeLinki: '',
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
@@ -727,6 +778,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
         konu: programForm.konu || null,
         kaynak: programForm.kaynak || null,
         aciklama: programForm.aciklama || null,
+        youtubeLinki: programForm.hasYoutubeLinki && programForm.youtubeLinki ? programForm.youtubeLinki.trim() : null,
         soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
         baslangicSaati: programForm.baslangicSaati,
         bitisSaati: programForm.bitisSaati
@@ -813,12 +865,15 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
     const startTime = (program.baslangic_saati || '').substring(0, 5);
     const endTime = (program.bitis_saati || '').substring(0, 5);
     const programDuration = calculateDurationBetweenTimes(startTime, endTime) || defaultEtutDuration;
+    const youtubeLinki = program.youtube_linki || '';
     setProgramForm({
       programTipi: program.program_tipi,
       ders: program.ders,
       konu: program.konu || '',
       kaynak: program.kaynak || '',
       aciklama: program.aciklama || '',
+      hasYoutubeLinki: !!youtubeLinki,
+      youtubeLinki: youtubeLinki,
       soruSayisi: program.soru_sayisi || '',
       baslangicSaati: startTime,
       bitisSaati: endTime,
@@ -834,6 +889,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       konu: '',
       kaynak: '',
       aciklama: '',
+      hasYoutubeLinki: false,
+      youtubeLinki: '',
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
@@ -935,6 +992,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
         konu: programForm.konu || null,
         kaynak: programForm.kaynak || null,
         aciklama: programForm.aciklama ? programForm.aciklama.trim() : null,
+        youtubeLinki: programForm.hasYoutubeLinki && programForm.youtubeLinki ? programForm.youtubeLinki.trim() : null,
         soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
         baslangicSaati: programForm.baslangicSaati,
         bitisSaati: programForm.bitisSaati
@@ -1785,6 +1843,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
     const konu = prog.konu;
     const kaynak = prog.kaynak;
     const aciklama = prog.aciklama;
+    const youtubeLinki = prog.youtube_linki;
     const soruSayisi = prog.soru_sayisi || prog.soruSayisi;
     const programTipi = prog.program_tipi || prog.programTipi || 'soru_cozum';
     const isRoutine = !!prog.is_routine;
@@ -1846,6 +1905,26 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
           {aciklama && (
             <div className="program-item-aciklama">
               {aciklama}
+            </div>
+          )}
+          {youtubeLinki && (
+            <div className="program-item-youtube-link" style={{marginTop: 6}}>
+              <a 
+                href={youtubeLinki} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  color: '#dc2626',
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  fontSize: '13px'
+                }}
+              >
+                ▶️ YouTube Video
+              </a>
             </div>
           )}
         </div>
@@ -2079,18 +2158,66 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
         <div className="screen-calendar">
           <div className="program-calendar">
         <div className="calendar-header">
-          {weekDays.map((day, index) => (
-            <div key={index} className="day-header">
-              <div className="calendar-day-label">
-                <div className="day-name">
-                {day.toLocaleDateString('tr-TR', { weekday: 'short' })}
+          {weekDays.map((day, index) => {
+            const dayPrograms = getDayPrograms(day);
+            const totalPrograms = dayPrograms.length;
+            const completedPrograms = dayPrograms.filter(p => p.durum === 'yapildi').length;
+            
+            // Pasta grafiği için yüzde hesaplama
+            const completedPercent = totalPrograms > 0 ? (completedPrograms / totalPrograms) * 100 : 0;
+            
+            // SVG pasta grafiği için stroke-dasharray hesaplama
+            const radius = 12;
+            const circumference = 2 * Math.PI * radius;
+            const completedStrokeDasharray = totalPrograms > 0 ? `${(completedPercent / 100) * circumference} ${circumference}` : '0';
+            
+            return (
+              <div key={index} className="day-header">
+                <div className="calendar-day-label">
+                  <div className="day-name">
+                    {day.toLocaleDateString('tr-TR', { weekday: 'short' })}
+                  </div>
+                  <div className="day-number">
+                    {day.toLocaleDateString('tr-TR', { day: 'numeric' })}
+                  </div>
+                </div>
+                {totalPrograms > 0 && (
+                  <div className="day-progress-chart" style={{
+                    marginTop: 6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <svg width="28" height="28" style={{ transform: 'rotate(-90deg)' }}>
+                      <circle
+                        cx="14"
+                        cy="14"
+                        r={radius}
+                        fill="none"
+                        stroke="rgba(255, 255, 255, 0.3)"
+                        strokeWidth="3"
+                      />
+                      {completedPercent > 0 && (
+                        <circle
+                          cx="14"
+                          cy="14"
+                          r={radius}
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth="3"
+                          strokeDasharray={completedStrokeDasharray}
+                          strokeLinecap="round"
+                          style={{
+                            transition: 'stroke-dasharray 0.3s ease'
+                          }}
+                        />
+                      )}
+                    </svg>
+                  </div>
+                )}
               </div>
-              <div className="day-number">
-                {day.toLocaleDateString('tr-TR', { day: 'numeric' })}
-              </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div
@@ -2228,6 +2355,26 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                   placeholder="İsteğe bağlı açıklama..."
                                 />
                               </div>
+                              <div className="inline-form-group">
+                                <label style={{display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer'}}>
+                                  <input
+                                    type="checkbox"
+                                    checked={programForm.hasYoutubeLinki}
+                                    onChange={(e) => setProgramForm({ ...programForm, hasYoutubeLinki: e.target.checked, youtubeLinki: e.target.checked ? programForm.youtubeLinki : '' })}
+                                    style={{cursor: 'pointer'}}
+                                  />
+                                  <span>Youtube Linki</span>
+                                </label>
+                                {programForm.hasYoutubeLinki && (
+                                  <input
+                                    type="url"
+                                    value={programForm.youtubeLinki}
+                                    onChange={(e) => setProgramForm({ ...programForm, youtubeLinki: e.target.value })}
+                                    placeholder="https://www.youtube.com/watch?v=..."
+                                    style={{marginTop: 8}}
+                                  />
+                                )}
+                              </div>
                               <div className="inline-form-actions">
                                 <button type="button" className="cancel-btn" onClick={handleCancelEdit}>
                                   İptal
@@ -2358,6 +2505,27 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                 title="Tıklayarak genişlet/küçült"
                               >
                                 💬 {prog.aciklama}
+                              </div>
+                            )}
+                            {prog.youtube_linki && (
+                              <div className="program-item-youtube-link" style={{marginTop: 6}}>
+                                <a 
+                                  href={prog.youtube_linki} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{
+                                    color: '#dc2626',
+                                    textDecoration: 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    fontWeight: 600,
+                                    fontSize: '13px'
+                                  }}
+                                >
+                                  ▶️ YouTube Video
+                                </a>
                               </div>
                             )}
                           </div>
@@ -2552,6 +2720,26 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                               rows="2"
                               placeholder="İsteğe bağlı açıklama..."
                             />
+                          </div>
+                          <div className="inline-form-group">
+                            <label style={{display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer'}}>
+                              <input
+                                type="checkbox"
+                                checked={programForm.hasYoutubeLinki}
+                                onChange={(e) => setProgramForm({ ...programForm, hasYoutubeLinki: e.target.checked, youtubeLinki: e.target.checked ? programForm.youtubeLinki : '' })}
+                                style={{cursor: 'pointer'}}
+                              />
+                              <span>Youtube Linki</span>
+                            </label>
+                            {programForm.hasYoutubeLinki && (
+                              <input
+                                type="url"
+                                value={programForm.youtubeLinki}
+                                onChange={(e) => setProgramForm({ ...programForm, youtubeLinki: e.target.value })}
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                style={{marginTop: 8}}
+                              />
+                            )}
                           </div>
                           <div className="inline-form-actions">
                             <button type="button" className="cancel-btn" onClick={handleCancelAddProgram}>

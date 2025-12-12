@@ -31,7 +31,7 @@ if (empty($teacherId)) {
 }
 
 // Öğretmenin öğrencilerini çek
-$query = "SELECT id, firstName, lastName, email, phone, className, alan, profilePhoto, createdAt 
+$query = "SELECT id, firstName, lastName, email, phone, className, alan, profilePhoto, meetingDay, meetingDate, online_status, son_giris_tarihi, createdAt 
           FROM ogrenciler 
           WHERE teacherId = ? 
           ORDER BY createdAt DESC";
