@@ -22,6 +22,9 @@ try {
 
     $programId = $data['programId'] ?? null;
     $status = $data['status'] ?? null;
+    $dogru = isset($data['dogru']) ? (int)$data['dogru'] : null;
+    $yanlis = isset($data['yanlis']) ? (int)$data['yanlis'] : null;
+    $bos = isset($data['bos']) ? (int)$data['bos'] : null;
     $isRoutineInstance = $data['isRoutineInstance'] ?? false;
     $routineId = $data['routineId'] ?? null;
     $ogrenciId = $data['ogrenciId'] ?? null;
@@ -59,9 +62,15 @@ try {
         $stmt = $db->prepare($query);
         $success = $stmt->execute([$routineId, $ogrenciId, $targetDate, $status]);
     } else {
-        $query = "UPDATE ogrenci_programlari SET durum = ? WHERE id = ?";
-        $stmt = $db->prepare($query);
-        $success = $stmt->execute([$status, $programId]);
+        if ($dogru !== null || $yanlis !== null || $bos !== null) {
+            $query = "UPDATE ogrenci_programlari SET durum = ?, dogru = ?, yanlis = ?, bos = ? WHERE id = ?";
+            $stmt = $db->prepare($query);
+            $success = $stmt->execute([$status, $dogru, $yanlis, $bos, $programId]);
+        } else {
+            $query = "UPDATE ogrenci_programlari SET durum = ? WHERE id = ?";
+            $stmt = $db->prepare($query);
+            $success = $stmt->execute([$status, $programId]);
+        }
     }
 
     if ($success) {

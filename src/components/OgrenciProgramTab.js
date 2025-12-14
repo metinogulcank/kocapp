@@ -24,7 +24,8 @@ import {
   faHistory,
   faTimes,
   faGripLines,
-  faExpandArrowsAlt
+  faExpandArrowsAlt,
+  faCheck
 } from '@fortawesome/free-solid-svg-icons';
 import './OgrenciProgramTab.css';
 import { EXAM_SUBJECTS_BY_AREA } from '../constants/examSubjects';
@@ -260,7 +261,7 @@ const createEmptyRoutineForm = () => ({
   soruSayisi: ''
 });
 
-const OgrenciProgramTab = ({ student, teacherId }) => {
+const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -290,6 +291,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
   const [exportImportMessage, setExportImportMessage] = useState('');
   const [exportImportMessageType, setExportImportMessageType] = useState('success');
   const [expandedAciklama, setExpandedAciklama] = useState(new Set());
+  const [statusInputs, setStatusInputs] = useState({}); // { programId: { dogru: '', yanlis: '', bos: '' } }
   const [calendarScale, setCalendarScale] = useState(1);
   const [defaultEtutDuration, setDefaultEtutDuration] = useState(() => loadStoredEtutDuration(teacherId));
   const [clearingWeek, setClearingWeek] = useState(false);
@@ -508,6 +510,18 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       
       if (data.success && data.programs) {
         setPrograms(data.programs);
+        // Programlar yüklendiğinde initial input değerlerini set et
+        const initialInputs = {};
+        data.programs.forEach(prog => {
+          if (prog.program_tipi === 'soru_cozum' && prog.id) {
+            initialInputs[prog.id] = {
+              dogru: prog.dogru !== null && prog.dogru !== undefined ? String(prog.dogru) : '',
+              yanlis: prog.yanlis !== null && prog.yanlis !== undefined ? String(prog.yanlis) : '',
+              bos: prog.bos !== null && prog.bos !== undefined ? String(prog.bos) : ''
+            };
+          }
+        });
+        setStatusInputs(prev => ({ ...prev, ...initialInputs }));
       }
     } catch (error) {
       console.error('Program yüklenemedi:', error);
@@ -898,13 +912,20 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
     });
   };
 
-  const handleStatusUpdate = async (program, newStatus) => {
+  const handleStatusUpdate = async (program, newStatus, dogru = null, yanlis = null, bos = null) => {
     if (!program?.id || !student?.id) return;
 
     const payload = {
       programId: program.id,
       status: newStatus
     };
+
+    // Soru çözümü için doğru/yanlış/boş değerlerini ekle
+    if (program.program_tipi === 'soru_cozum' && (dogru !== null || yanlis !== null || bos !== null)) {
+      payload.dogru = dogru !== null ? parseInt(dogru) || 0 : null;
+      payload.yanlis = yanlis !== null ? parseInt(yanlis) || 0 : null;
+      payload.bos = bos !== null ? parseInt(bos) || 0 : null;
+    }
 
     if (program.is_routine) {
       payload.isRoutineInstance = true;
@@ -926,6 +947,12 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       if (data.success) {
         fetchStudentProgram();
         setOpenStatusDropdown(null);
+        // Input değerlerini temizle
+        setStatusInputs(prev => {
+          const newInputs = { ...prev };
+          delete newInputs[program.id];
+          return newInputs;
+        });
       } else {
         alert(data.message || 'Durum güncellenemedi');
       }
@@ -933,6 +960,48 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       console.error('Durum güncellenemedi:', error);
       alert('Durum güncellenemedi');
     }
+  };
+
+  // Durum hesaplama fonksiyonu
+  const calculateStatus = (program) => {
+    // Eğer soru çözümü değilse, direkt durumu döndür
+    if (program.program_tipi !== 'soru_cozum' || !program.soru_sayisi) {
+      return program.durum || 'yapilmadi';
+    }
+
+    // Eğer veritabanında durum zaten kaydedilmişse, onu kullan
+    // (çünkü bu durum zaten doğru/yanlış değerlerine göre hesaplanmış ve kaydedilmiş)
+    if (program.durum && program.durum !== 'yapilmadi' && program.durum !== '') {
+      return program.durum;
+    }
+
+    // Eğer durum yoksa veya yapılmadıysa, doğru/yanlış değerlerine göre hesapla
+    const dogru = program.dogru !== null && program.dogru !== undefined ? parseInt(program.dogru) || 0 : null;
+    const yanlis = program.yanlis !== null && program.yanlis !== undefined ? parseInt(program.yanlis) || 0 : null;
+    const soruSayisi = parseInt(program.soru_sayisi) || 0;
+
+    // Eğer hiç değer girilmemişse (null veya undefined)
+    if (dogru === null && yanlis === null) {
+      return program.durum || 'yapilmadi';
+    }
+
+    // Girilen değerleri kontrol et
+    const dogruVal = dogru !== null ? dogru : 0;
+    const yanlisVal = yanlis !== null ? yanlis : 0;
+    const toplam = dogruVal + yanlisVal;
+
+    // Eğer soru sayısına eşitse yapıldı
+    if (toplam === soruSayisi && soruSayisi > 0) {
+      return 'yapildi';
+    }
+
+    // Eğer değer girilmiş ama soru sayısına eşit değilse eksik yapıldı
+    if (toplam > 0 && toplam < soruSayisi) {
+      return 'eksik_yapildi';
+    }
+
+    // Varsayılan durum
+    return program.durum || 'yapilmadi';
   };
 
   const handleClearWeekProgram = async () => {
@@ -2084,68 +2153,72 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
             style={{ display: 'none' }}
             onChange={handleImportFileChange}
           />
-          <button type="button" className="program-action-btn btn-ai" onClick={handleOpenAiAnalysis}>
-            <FontAwesomeIcon icon={faRobot} /> Yapay Zeka AI
-          </button>
-          <button type="button" className="program-action-btn btn-analysis" onClick={handleOpenTeacherAnalysis}>
-            <FontAwesomeIcon icon={faChartLine} /> Konu Başarı Analizi
-          </button>
-          <button type="button" className="program-action-btn btn-routine" onClick={openRoutineModal}>
-            <FontAwesomeIcon icon={faClipboardList} /> Rutin Görevler
-          </button>
-          <button
-            type="button"
-            className="program-action-btn btn-template"
-            onClick={() => setShowTemplateList(true)}
-          >
-            <FontAwesomeIcon icon={faCalendarAlt} /> Hazır Şablonlar
-          </button>
-          <div className="export-import-group" ref={exportMenuRef}>
-            <button
-              type="button"
-              className={`program-action-btn btn-export ${showExportMenu ? 'active' : ''}`}
-              onClick={handleToggleExportMenu}
-              ref={exportButtonRef}
-            >
-              <span className="export-icons">
-                <FontAwesomeIcon icon={faFileExport} />
-                <FontAwesomeIcon icon={faFileImport} />
-              </span>
-              Dışarı Aktar / İçeri Aktar
-            </button>
-            {showExportMenu && (
-              <div className="export-dropdown">
+          {!isStudentPanel && (
+            <>
+              <button type="button" className="program-action-btn btn-ai" onClick={handleOpenAiAnalysis}>
+                <FontAwesomeIcon icon={faRobot} /> Yapay Zeka AI
+              </button>
+              <button type="button" className="program-action-btn btn-analysis" onClick={handleOpenTeacherAnalysis}>
+                <FontAwesomeIcon icon={faChartLine} /> Konu Başarı Analizi
+              </button>
+              <button type="button" className="program-action-btn btn-routine" onClick={openRoutineModal}>
+                <FontAwesomeIcon icon={faClipboardList} /> Rutin Görevler
+              </button>
+              <button
+                type="button"
+                className="program-action-btn btn-template"
+                onClick={() => setShowTemplateList(true)}
+              >
+                <FontAwesomeIcon icon={faCalendarAlt} /> Hazır Şablonlar
+              </button>
+              <div className="export-import-group" ref={exportMenuRef}>
                 <button
                   type="button"
-                  className="export-dropdown-item"
-                  onClick={handleExportProgram}
-                  disabled={exportLoading}
+                  className={`program-action-btn btn-export ${showExportMenu ? 'active' : ''}`}
+                  onClick={handleToggleExportMenu}
+                  ref={exportButtonRef}
                 >
-                  {exportLoading ? 'Dışa Aktarılıyor...' : 'Dışarı Aktar'}
+                  <span className="export-icons">
+                    <FontAwesomeIcon icon={faFileExport} />
+                    <FontAwesomeIcon icon={faFileImport} />
+                  </span>
+                  Dışarı Aktar / İçeri Aktar
                 </button>
-                <button
-                  type="button"
-                  className="export-dropdown-item"
-                  onClick={handleImportClick}
-                  disabled={importLoading}
-                >
-                  {importLoading ? 'İçe Aktarılıyor...' : 'İçeri Aktar'}
-          </button>
-        </div>
-            )}
-      </div>
-          <button type="button" className="program-action-btn btn-print" onClick={handlePrint}>
-            <FontAwesomeIcon icon={faPrint} /> Yazdır
-          </button>
-          <button
-            type="button"
-            className="program-action-btn btn-clear-week"
-            onClick={handleClearWeekProgram}
-            disabled={clearingWeek}
-          >
-            <FontAwesomeIcon icon={faTrash} />{' '}
-            {clearingWeek ? 'Siliniyor...' : 'Haftalık Programı Temizle'}
-          </button>
+                {showExportMenu && (
+                  <div className="export-dropdown">
+                    <button
+                      type="button"
+                      className="export-dropdown-item"
+                      onClick={handleExportProgram}
+                      disabled={exportLoading}
+                    >
+                      {exportLoading ? 'Dışa Aktarılıyor...' : 'Dışarı Aktar'}
+                    </button>
+                    <button
+                      type="button"
+                      className="export-dropdown-item"
+                      onClick={handleImportClick}
+                      disabled={importLoading}
+                    >
+                      {importLoading ? 'İçe Aktarılıyor...' : 'İçeri Aktar'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button type="button" className="program-action-btn btn-print" onClick={handlePrint}>
+                <FontAwesomeIcon icon={faPrint} /> Yazdır
+              </button>
+              <button
+                type="button"
+                className="program-action-btn btn-clear-week"
+                onClick={handleClearWeekProgram}
+                disabled={clearingWeek}
+              >
+                <FontAwesomeIcon icon={faTrash} />{' '}
+                {clearingWeek ? 'Siliniyor...' : 'Haftalık Programı Temizle'}
+              </button>
+            </>
+          )}
         </div>
       </div>
       {exportImportMessage && (
@@ -2413,7 +2486,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                               
                           </div>
                           <div className="program-item-actions">
-                              {!isRoutine && (
+                              {!isStudentPanel && !isRoutine && (
                                 <>
                                 <button
                                   className="edit-program-btn"
@@ -2437,6 +2510,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                 </button>
                                 </>
                               )}
+                              {!isStudentPanel && (
                                 <button
                                   className="delete-program-btn"
                                   onClick={(e) => {
@@ -2453,6 +2527,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                 >
                                   <FontAwesomeIcon icon={faTrash} />
                                 </button>
+                              )}
                               </div>
                           {/* Subject - Topic */}
                           <div className="program-item-subject">
@@ -2530,9 +2605,185 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                             )}
                           </div>
                           
+                          {/* Soru Çözümü - Doğru/Yanlış/Boş Kutucukları */}
+                          {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (() => {
+                            const originalInputs = {
+                              dogru: prog.dogru !== null && prog.dogru !== undefined ? String(prog.dogru) : '',
+                              yanlis: prog.yanlis !== null && prog.yanlis !== undefined ? String(prog.yanlis) : '',
+                              bos: prog.bos !== null && prog.bos !== undefined ? String(prog.bos) : ''
+                            };
+                            const currentInputs = statusInputs[prog.id] || originalInputs;
+                            
+                            // Değişiklik kontrolü
+                            const hasChanges = (
+                              String(currentInputs.dogru || '') !== String(originalInputs.dogru || '') ||
+                              String(currentInputs.yanlis || '') !== String(originalInputs.yanlis || '') ||
+                              String(currentInputs.bos || '') !== String(originalInputs.bos || '')
+                            );
+
+                            return (
+                              <div style={{ 
+                                marginTop: '8px', 
+                                padding: '10px', 
+                                background: 'rgba(255, 255, 255, 0.15)',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255, 255, 255, 0.3)'
+                              }}>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(255, 255, 255, 0.9)', marginBottom: '8px' }}>
+                                  Soru Sonuçları (Toplam: {prog.soru_sayisi})
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: isStudentPanel ? '1fr 1fr 1fr auto' : '1fr 1fr 1fr', gap: '8px', alignItems: 'end' }}>
+                                  <div>
+                                    <label style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.8)', display: 'block', marginBottom: '4px' }}>Doğru</label>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
+                                      value={currentInputs.dogru}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        // Sadece sayı girişine izin ver
+                                        if (value === '' || /^\d+$/.test(value)) {
+                                          const numValue = parseInt(value) || 0;
+                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                            setStatusInputs(prev => ({
+                                              ...prev,
+                                              [prog.id]: { ...currentInputs, dogru: value }
+                                            }));
+                                          }
+                                        }
+                                      }}
+                                      style={{ 
+                                        width: '100%', 
+                                        padding: '6px', 
+                                        border: '1px solid rgba(255, 255, 255, 0.3)', 
+                                        borderRadius: '4px',
+                                        fontSize: '13px',
+                                        background: 'rgba(255, 255, 255, 0.95)',
+                                        color: '#1f2937'
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.8)', display: 'block', marginBottom: '4px' }}>Yanlış</label>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
+                                      value={currentInputs.yanlis}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        // Sadece sayı girişine izin ver
+                                        if (value === '' || /^\d+$/.test(value)) {
+                                          const numValue = parseInt(value) || 0;
+                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                            setStatusInputs(prev => ({
+                                              ...prev,
+                                              [prog.id]: { ...currentInputs, yanlis: value }
+                                            }));
+                                          }
+                                        }
+                                      }}
+                                      style={{ 
+                                        width: '100%', 
+                                        padding: '6px', 
+                                        border: '1px solid rgba(255, 255, 255, 0.3)', 
+                                        borderRadius: '4px',
+                                        fontSize: '13px',
+                                        background: 'rgba(255, 255, 255, 0.95)',
+                                        color: '#1f2937'
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.8)', display: 'block', marginBottom: '4px' }}>Boş</label>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
+                                      value={currentInputs.bos}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        // Sadece sayı girişine izin ver
+                                        if (value === '' || /^\d+$/.test(value)) {
+                                          const numValue = parseInt(value) || 0;
+                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                            setStatusInputs(prev => ({
+                                              ...prev,
+                                              [prog.id]: { ...currentInputs, bos: value }
+                                            }));
+                                          }
+                                        }
+                                      }}
+                                      style={{ 
+                                        width: '100%', 
+                                        padding: '6px', 
+                                        border: '1px solid rgba(255, 255, 255, 0.3)', 
+                                        borderRadius: '4px',
+                                        fontSize: '13px',
+                                        background: 'rgba(255, 255, 255, 0.95)',
+                                        color: '#1f2937'
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                  {/* Tik butonu sadece öğrenci panelinde görünsün */}
+                                  {isStudentPanel && (
+                                    <button
+                                      type="button"
+                                      disabled={!hasChanges}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!hasChanges) return;
+                                        
+                                        const dogru = parseInt(currentInputs.dogru) || 0;
+                                        const yanlis = parseInt(currentInputs.yanlis) || 0;
+                                        const bos = parseInt(currentInputs.bos) || 0;
+                                        const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+                                        
+                                        let newStatus;
+                                        if (dogru === 0 && yanlis === 0) {
+                                          newStatus = 'yapilmadi';
+                                        } else if (dogru + yanlis === soruSayisi) {
+                                          newStatus = 'yapildi';
+                                        } else {
+                                          newStatus = 'eksik_yapildi';
+                                        }
+                                        
+                                        handleStatusUpdate(prog, newStatus, dogru, yanlis, bos);
+                                      }}
+                                      style={{
+                                        padding: '8px 10px',
+                                        background: hasChanges ? '#10b981' : 'rgba(255, 255, 255, 0.2)',
+                                        color: hasChanges ? 'white' : 'rgba(255, 255, 255, 0.5)',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: hasChanges ? 'pointer' : 'not-allowed',
+                                        fontSize: '14px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        minWidth: '40px',
+                                        height: '32px',
+                                        transition: 'all 0.2s',
+                                        boxShadow: hasChanges ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
+                                      }}
+                                      title={hasChanges ? 'Değişiklikleri kaydet' : 'Değişiklik yok'}
+                                    >
+                                      <FontAwesomeIcon icon={faCheck} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          
                           {/* Status */}
                           {(() => {
-                            const status = prog.durum || 'yapilmadi';
+                            const calculatedStatus = calculateStatus(prog);
+                            const status = calculatedStatus;
                             const statusLabel =
                               status === 'yapildi'
                                 ? '✓ Yapıldı'
@@ -2560,12 +2811,13 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                       openStatusDropdown === prog.id ? faChevronUp : faChevronDown
                                     }
                                     className="status-dropdown-caret"
-                                />
+                                  />
                               </div>
                                 {openStatusDropdown === prog.id && (
                                   <div
                                     className="status-dropdown-menu"
                                     onClick={(e) => e.stopPropagation()}
+                                    style={{ minWidth: '200px', zIndex: 1000 }}
                                 >
                                     <button
                                       type="button"
@@ -2575,7 +2827,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                       onClick={() => handleStatusUpdate(prog, 'yapildi')}
                                     >
                                       ✓ Yapıldı
-                              </button>
+                                    </button>
                                     <button
                                       type="button"
                                       className={`status-dropdown-item ${
@@ -2593,7 +2845,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                                       onClick={() => handleStatusUpdate(prog, 'yapilmadi')}
                                     >
                                       ✗ Yapılmadı
-                              </button>
+                                    </button>
                             </div>
                                 )}
                               </div>
@@ -2603,8 +2855,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                       );
                     })}
                     
-                    {/* Görev Ekle Butonu */}
-                    {addingProgramDay?.getTime() !== day.getTime() && (
+                    {/* Görev Ekle Butonu - Sadece öğretmen panelinde göster */}
+                    {!isStudentPanel && addingProgramDay?.getTime() !== day.getTime() && (
                       <button
                         className="add-program-inline-btn"
                         onClick={() => handleAddProgramClick(day)}
@@ -2613,8 +2865,8 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                       </button>
                     )}
                     
-                    {/* Inline Program Ekleme Formu */}
-                    {addingProgramDay?.getTime() === day.getTime() && (
+                    {/* Inline Program Ekleme Formu - Sadece öğretmen panelinde göster */}
+                    {!isStudentPanel && addingProgramDay?.getTime() === day.getTime() && (
                       <div
                         className="inline-program-form"
                         ref={addProgramFormRef}
@@ -2792,6 +3044,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
       </div>
       </div>
 
+      {!isStudentPanel && (
       <div className="analysis-section">
         <div className="analysis-card teacher-analysis-card" ref={teacherAnalysisRef}>
           <div className="analysis-card-header">
@@ -2853,6 +3106,7 @@ const OgrenciProgramTab = ({ student, teacherId }) => {
                 </div>
               </div>
       </div>
+      )}
 
       {/* Rutin Görev Modalı */}
       {showRoutineModal && (

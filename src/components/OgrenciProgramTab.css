@@ -716,7 +716,7 @@
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
   padding: 6px;
   min-width: 200px;
-  z-index: 200;
+  z-index: 1000;
   border: 1px solid rgba(226, 232, 240, 0.9);
 }
 
