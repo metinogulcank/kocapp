@@ -511,17 +511,28 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
       if (data.success && data.programs) {
         setPrograms(data.programs);
         // Programlar yüklendiğinde initial input değerlerini set et
+        // Her zaman veritabanından gelen değerleri kullan (0 değeri de geçerli)
         const initialInputs = {};
         data.programs.forEach(prog => {
           if (prog.program_tipi === 'soru_cozum' && prog.id) {
+            // 0 değeri de geçerli, bu yüzden sadece null/undefined kontrolü yapıyoruz
+            const dogruVal = (prog.dogru !== null && prog.dogru !== undefined && prog.dogru !== '') ? String(prog.dogru) : '';
+            const yanlisVal = (prog.yanlis !== null && prog.yanlis !== undefined && prog.yanlis !== '') ? String(prog.yanlis) : '';
+            const bosVal = (prog.bos !== null && prog.bos !== undefined && prog.bos !== '') ? String(prog.bos) : '';
+            
+            console.log(`Program ${prog.id} - Dogru: ${prog.dogru} (${typeof prog.dogru}), Yanlis: ${prog.yanlis} (${typeof prog.yanlis}), Bos: ${prog.bos} (${typeof prog.bos})`);
+            console.log(`Program ${prog.id} - Dogru String: ${dogruVal}, Yanlis String: ${yanlisVal}, Bos String: ${bosVal}`);
+            
             initialInputs[prog.id] = {
-              dogru: prog.dogru !== null && prog.dogru !== undefined ? String(prog.dogru) : '',
-              yanlis: prog.yanlis !== null && prog.yanlis !== undefined ? String(prog.yanlis) : '',
-              bos: prog.bos !== null && prog.bos !== undefined ? String(prog.bos) : ''
+              dogru: dogruVal,
+              yanlis: yanlisVal,
+              bos: bosVal
             };
           }
         });
-        setStatusInputs(prev => ({ ...prev, ...initialInputs }));
+        console.log('Initial inputs:', initialInputs);
+        // Veritabanından gelen değerleri kullan, mevcut input değerlerini override et
+        setStatusInputs(initialInputs);
       }
     } catch (error) {
       console.error('Program yüklenemedi:', error);
@@ -921,10 +932,11 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
     };
 
     // Soru çözümü için doğru/yanlış/boş değerlerini ekle
-    if (program.program_tipi === 'soru_cozum' && (dogru !== null || yanlis !== null || bos !== null)) {
-      payload.dogru = dogru !== null ? parseInt(dogru) || 0 : null;
-      payload.yanlis = yanlis !== null ? parseInt(yanlis) || 0 : null;
-      payload.bos = bos !== null ? parseInt(bos) || 0 : null;
+    if (program.program_tipi === 'soru_cozum') {
+      // Değerler her zaman gönderilmeli (0 değeri de geçerli)
+      payload.dogru = dogru !== null && dogru !== undefined ? parseInt(dogru) : 0;
+      payload.yanlis = yanlis !== null && yanlis !== undefined ? parseInt(yanlis) : 0;
+      payload.bos = bos !== null && bos !== undefined ? parseInt(bos) : 0;
     }
 
     if (program.is_routine) {
@@ -933,6 +945,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
       payload.routineId = program.routine_id;
       payload.ogrenciId = program.ogrenci_id;
     }
+
+    console.log('Gönderilen payload:', payload);
+    console.log('Program tipi:', program.program_tipi);
+    console.log('Dogru/Yanlis/Bos:', dogru, yanlis, bos);
 
     try {
       const response = await fetch('https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student_program_status.php', {
@@ -945,14 +961,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
 
       const data = await response.json();
       if (data.success) {
+        // Programları yeniden yükle - fetchStudentProgram zaten statusInputs'i güncelleyecek
         fetchStudentProgram();
         setOpenStatusDropdown(null);
-        // Input değerlerini temizle
-        setStatusInputs(prev => {
-          const newInputs = { ...prev };
-          delete newInputs[program.id];
-          return newInputs;
-        });
       } else {
         alert(data.message || 'Durum güncellenemedi');
       }
@@ -2607,12 +2618,22 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                           
                           {/* Soru Çözümü - Doğru/Yanlış/Boş Kutucukları */}
                           {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (() => {
+                            // Veritabanından gelen değerleri kullan (0 değeri de geçerli)
+                            // 0 değeri de geçerli olduğu için sadece null/undefined kontrolü yapıyoruz
                             const originalInputs = {
-                              dogru: prog.dogru !== null && prog.dogru !== undefined ? String(prog.dogru) : '',
-                              yanlis: prog.yanlis !== null && prog.yanlis !== undefined ? String(prog.yanlis) : '',
-                              bos: prog.bos !== null && prog.bos !== undefined ? String(prog.bos) : ''
+                              dogru: (prog.dogru !== null && prog.dogru !== undefined && prog.dogru !== '') ? String(prog.dogru) : '',
+                              yanlis: (prog.yanlis !== null && prog.yanlis !== undefined && prog.yanlis !== '') ? String(prog.yanlis) : '',
+                              bos: (prog.bos !== null && prog.bos !== undefined && prog.bos !== '') ? String(prog.bos) : ''
                             };
+                            // Eğer statusInputs'te bu program için değer yoksa, originalInputs'i kullan
                             const currentInputs = statusInputs[prog.id] || originalInputs;
+                            
+                            // Debug için
+                            if (prog.id && (prog.dogru !== null || prog.yanlis !== null || prog.bos !== null)) {
+                              console.log(`Program ${prog.id} render - DB: dogru=${prog.dogru}, yanlis=${prog.yanlis}, bos=${prog.bos}`);
+                              console.log(`Program ${prog.id} render - Original:`, originalInputs);
+                              console.log(`Program ${prog.id} render - Current:`, currentInputs);
+                            }
                             
                             // Değişiklik kontrolü
                             const hasChanges = (
@@ -2640,7 +2661,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.dogru}
+                                      disabled={!isStudentPanel}
+                                      readOnly={!isStudentPanel}
                                       onChange={(e) => {
+                                        if (!isStudentPanel) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2659,8 +2683,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         border: '1px solid rgba(255, 255, 255, 0.3)', 
                                         borderRadius: '4px',
                                         fontSize: '13px',
-                                        background: 'rgba(255, 255, 255, 0.95)',
-                                        color: '#1f2937'
+                                        background: isStudentPanel ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)',
+                                        color: '#1f2937',
+                                        cursor: isStudentPanel ? 'text' : 'default',
+                                        opacity: isStudentPanel ? 1 : 0.8
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     />
@@ -2672,7 +2698,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.yanlis}
+                                      disabled={!isStudentPanel}
+                                      readOnly={!isStudentPanel}
                                       onChange={(e) => {
+                                        if (!isStudentPanel) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2691,8 +2720,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         border: '1px solid rgba(255, 255, 255, 0.3)', 
                                         borderRadius: '4px',
                                         fontSize: '13px',
-                                        background: 'rgba(255, 255, 255, 0.95)',
-                                        color: '#1f2937'
+                                        background: isStudentPanel ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)',
+                                        color: '#1f2937',
+                                        cursor: isStudentPanel ? 'text' : 'default',
+                                        opacity: isStudentPanel ? 1 : 0.8
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     />
@@ -2704,7 +2735,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.bos}
+                                      disabled={!isStudentPanel}
+                                      readOnly={!isStudentPanel}
                                       onChange={(e) => {
+                                        if (!isStudentPanel) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2723,13 +2757,15 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         border: '1px solid rgba(255, 255, 255, 0.3)', 
                                         borderRadius: '4px',
                                         fontSize: '13px',
-                                        background: 'rgba(255, 255, 255, 0.95)',
-                                        color: '#1f2937'
+                                        background: isStudentPanel ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)',
+                                        color: '#1f2937',
+                                        cursor: isStudentPanel ? 'text' : 'default',
+                                        opacity: isStudentPanel ? 1 : 0.8
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     />
                                   </div>
-                                  {/* Tik butonu sadece öğrenci panelinde görünsün */}
+                                  {/* Kaydet butonu - sadece öğrenci için */}
                                   {isStudentPanel && (
                                     <button
                                       type="button"
@@ -2738,10 +2774,14 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         e.stopPropagation();
                                         if (!hasChanges) return;
                                         
-                                        const dogru = parseInt(currentInputs.dogru) || 0;
-                                        const yanlis = parseInt(currentInputs.yanlis) || 0;
-                                        const bos = parseInt(currentInputs.bos) || 0;
+                                        // Boş string kontrolü: eğer boş string ise 0, değilse parseInt
+                                        const dogru = currentInputs.dogru === '' ? 0 : (parseInt(currentInputs.dogru) || 0);
+                                        const yanlis = currentInputs.yanlis === '' ? 0 : (parseInt(currentInputs.yanlis) || 0);
+                                        const bos = currentInputs.bos === '' ? 0 : (parseInt(currentInputs.bos) || 0);
                                         const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+                                        
+                                        console.log('Kaydet butonu - Dogru:', dogru, 'Yanlis:', yanlis, 'Bos:', bos);
+                                        console.log('Current inputs:', currentInputs);
                                         
                                         let newStatus;
                                         if (dogru === 0 && yanlis === 0) {

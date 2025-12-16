@@ -28,7 +28,10 @@ try {
         exit;
     }
 
-    $programQuery = "SELECT * FROM ogrenci_programlari 
+    $programQuery = "SELECT id, ogrenci_id, ogretmen_id, routine_id, tarih, baslangic_saati, bitis_saati, 
+                            program_tipi, ders, konu, kaynak, aciklama, soru_sayisi, durum, 
+                            dogru, yanlis, bos, youtube_linki
+                     FROM ogrenci_programlari 
                      WHERE ogrenci_id = ? 
                      AND tarih >= ? 
                      AND tarih <= ? 
@@ -37,6 +40,13 @@ try {
     $programStmt = $db->prepare($programQuery);
     $programStmt->execute([$studentId, $startDate, $endDate]);
     $programs = $programStmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Debug: Soru çözümü programlarının dogru/yanlis/bos değerlerini logla
+    foreach ($programs as $prog) {
+        if ($prog['program_tipi'] === 'soru_cozum') {
+            error_log("Program {$prog['id']}: dogru={$prog['dogru']}, yanlis={$prog['yanlis']}, bos={$prog['bos']}");
+        }
+    }
 
     // Aktif rutinleri çek ve ilgili günleri hesapla
     $routineQuery = "SELECT * FROM ogrenci_rutinleri 
@@ -125,23 +135,58 @@ try {
                         $statusKey = $routine['id'] . '|' . $tarih;
                         $routineStatus = $routineStatuses[$statusKey] ?? 'yapilmadi';
 
-                        $programs[] = [
-                            'id' => 'routine_' . $routine['id'] . '_' . $tarih,
-                            'ogrenci_id' => $routine['ogrenci_id'],
-                            'ogretmen_id' => $routine['ogretmen_id'],
-                            'routine_id' => $routine['id'],
-                            'tarih' => $tarih,
-                            'baslangic_saati' => $routine['baslangic_saati'],
-                            'bitis_saati' => $routine['baslangic_saati'], // Set bitis_saati for routines
-                            'program_tipi' => $routine['program_tipi'],
-                            'ders' => $routine['ders'],
-                            'konu' => $routine['konu'],
-                            'kaynak' => $routine['kaynak'],
-                            'aciklama' => $routine['aciklama'] ?? null,
-                            'soru_sayisi' => $routine['soru_sayisi'],
-                            'durum' => $routineStatus,
-                            'is_routine' => true
-                        ];
+                        // Bu rutin programı için ogrenci_programlari tablosunda kayıt var mı kontrol et
+                        $routineProgramQuery = "SELECT * FROM ogrenci_programlari 
+                                               WHERE routine_id = ? AND ogrenci_id = ? AND tarih = ?";
+                        $routineProgramStmt = $db->prepare($routineProgramQuery);
+                        $routineProgramStmt->execute([$routine['id'], $studentId, $tarih]);
+                        $routineProgram = $routineProgramStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($routineProgram) {
+                            // ogrenci_programlari tablosunda kayıt varsa, o kaydı kullan
+                            $programs[] = [
+                                'id' => $routineProgram['id'],
+                                'ogrenci_id' => $routineProgram['ogrenci_id'],
+                                'ogretmen_id' => $routineProgram['ogretmen_id'],
+                                'routine_id' => $routineProgram['routine_id'],
+                                'tarih' => $routineProgram['tarih'],
+                                'baslangic_saati' => $routineProgram['baslangic_saati'],
+                                'bitis_saati' => $routineProgram['bitis_saati'],
+                                'program_tipi' => $routineProgram['program_tipi'],
+                                'ders' => $routineProgram['ders'],
+                                'konu' => $routineProgram['konu'],
+                                'kaynak' => $routineProgram['kaynak'],
+                                'aciklama' => $routineProgram['aciklama'] ?? null,
+                                'soru_sayisi' => $routineProgram['soru_sayisi'],
+                                'durum' => $routineProgram['durum'],
+                                'dogru' => $routineProgram['dogru'],
+                                'yanlis' => $routineProgram['yanlis'],
+                                'bos' => $routineProgram['bos'],
+                                'is_routine' => true
+                            ];
+                        } else {
+                            // ogrenci_programlari tablosunda kayıt yoksa, rutin bilgilerini kullan
+                            $programs[] = [
+                                'id' => 'routine_' . $routine['id'] . '_' . $tarih,
+                                'ogrenci_id' => $routine['ogrenci_id'],
+                                'ogretmen_id' => $routine['ogretmen_id'],
+                                'routine_id' => $routine['id'],
+                                'tarih' => $tarih,
+                                'baslangic_saati' => $routine['baslangic_saati'],
+                                'bitis_saati' => $routine['baslangic_saati'],
+                                'program_tipi' => $routine['program_tipi'],
+                                'ders' => $routine['ders'],
+                                'konu' => $routine['konu'],
+                                'kaynak' => $routine['kaynak'],
+                                'aciklama' => $routine['aciklama'] ?? null,
+                                'soru_sayisi' => $routine['soru_sayisi'],
+                                'durum' => $routineStatus,
+                                'dogru' => null,
+                                'yanlis' => null,
+                                'bos' => null,
+                                'is_routine' => true
+                            ];
+                        }
                         
                         // Add to existing keys to prevent duplicates
                         $existingKeys[$key] = true;

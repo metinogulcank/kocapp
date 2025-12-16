@@ -30,9 +30,16 @@ try {
     $studentId = $data['studentId'];
     $onlineStatus = (int)$data['onlineStatus']; // 0 veya 1
 
-    $updateQuery = "UPDATE ogrenciler SET online_status = ? WHERE id = ?";
-    $stmt = $db->prepare($updateQuery);
-    $stmt->execute([$onlineStatus, $studentId]);
+    // Online yaparken son_giris_tarihi'ni de güncelle
+    if ($onlineStatus === 1) {
+        $updateQuery = "UPDATE ogrenciler SET online_status = 1, son_giris_tarihi = NOW() WHERE id = ?";
+        $stmt = $db->prepare($updateQuery);
+        $stmt->execute([$studentId]);
+    } else {
+        $updateQuery = "UPDATE ogrenciler SET online_status = 0 WHERE id = ?";
+        $stmt = $db->prepare($updateQuery);
+        $stmt->execute([$studentId]);
+    }
 
     echo json_encode([
         'success' => true,

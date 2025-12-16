@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './Kaynaklar.css';
 
-const Kaynaklar = () => {
+const Kaynaklar = ({ isStudent = false }) => {
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedLevel, setSelectedLevel] = useState('');

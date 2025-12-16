@@ -73,7 +73,8 @@ try {
             'denemeAdi' => $deneme['deneme_adi'],
             'denemeTarihi' => $deneme['deneme_tarihi'],
             'notlar' => $deneme['notlar'],
-            'sinavTipi' => $deneme['sinav_tipi'] || 'tyt',
+            // Do not use `||` here; it casts to bool. Fallback to 'tyt' only when empty/null.
+            'sinavTipi' => !empty($deneme['sinav_tipi']) ? $deneme['sinav_tipi'] : 'tyt',
             'dersSonuclari' => $formattedDersSonuclari,
             'degerlendirme' => $degerlendirme ? [
                 'zamanYeterli' => (int)$degerlendirme['zaman_yeterli'],

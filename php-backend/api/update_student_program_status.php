@@ -22,9 +22,10 @@ try {
 
     $programId = $data['programId'] ?? null;
     $status = $data['status'] ?? null;
-    $dogru = isset($data['dogru']) ? (int)$data['dogru'] : null;
-    $yanlis = isset($data['yanlis']) ? (int)$data['yanlis'] : null;
-    $bos = isset($data['bos']) ? (int)$data['bos'] : null;
+    // 0 değeri de geçerli, bu yüzden array_key_exists kullanıyoruz
+    $dogru = array_key_exists('dogru', $data) ? (int)$data['dogru'] : null;
+    $yanlis = array_key_exists('yanlis', $data) ? (int)$data['yanlis'] : null;
+    $bos = array_key_exists('bos', $data) ? (int)$data['bos'] : null;
     $isRoutineInstance = $data['isRoutineInstance'] ?? false;
     $routineId = $data['routineId'] ?? null;
     $ogrenciId = $data['ogrenciId'] ?? null;
@@ -56,17 +57,89 @@ try {
             exit;
         }
 
+        // Rutin durumunu güncelle
         $query = "INSERT INTO ogrenci_rutin_durumlari (routine_id, ogrenci_id, tarih, durum)
                   VALUES (?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE durum = VALUES(durum)";
         $stmt = $db->prepare($query);
         $success = $stmt->execute([$routineId, $ogrenciId, $targetDate, $status]);
+
+        // Eğer dogru/yanlis/bos değerleri gönderilmişse, ogrenci_programlari tablosunda kayıt oluştur veya güncelle
+        if ($success && (array_key_exists('dogru', $data) || array_key_exists('yanlis', $data) || array_key_exists('bos', $data))) {
+            // Önce rutin bilgilerini çek
+            $routineQuery = "SELECT * FROM ogrenci_rutinleri WHERE id = ?";
+            $routineStmt = $db->prepare($routineQuery);
+            $routineStmt->execute([$routineId]);
+            $routine = $routineStmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($routine) {
+                // ogrenci_programlari tablosunda bu rutin programı için kayıt var mı kontrol et
+                $checkQuery = "SELECT id FROM ogrenci_programlari WHERE routine_id = ? AND ogrenci_id = ? AND tarih = ?";
+                $checkStmt = $db->prepare($checkQuery);
+                $checkStmt->execute([$routineId, $ogrenciId, $targetDate]);
+                $existingProgram = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+                $dogruValue = $dogru !== null ? $dogru : 0;
+                $yanlisValue = $yanlis !== null ? $yanlis : 0;
+                $bosValue = $bos !== null ? $bos : 0;
+
+                if ($existingProgram) {
+                    // Mevcut kaydı güncelle
+                    $updateQuery = "UPDATE ogrenci_programlari SET durum = ?, dogru = ?, yanlis = ?, bos = ? WHERE id = ?";
+                    $updateStmt = $db->prepare($updateQuery);
+                    $success = $updateStmt->execute([$status, $dogruValue, $yanlisValue, $bosValue, $existingProgram['id']]);
+                } else {
+                    // Yeni kayıt oluştur
+                    $programId = bin2hex(random_bytes(12));
+                    $insertQuery = "INSERT INTO ogrenci_programlari 
+                                   (id, ogrenci_id, ogretmen_id, routine_id, tarih, baslangic_saati, bitis_saati, 
+                                    program_tipi, ders, konu, kaynak, aciklama, soru_sayisi, durum, dogru, yanlis, bos) 
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    $insertStmt = $db->prepare($insertQuery);
+                    $success = $insertStmt->execute([
+                        $programId,
+                        $ogrenciId,
+                        $routine['ogretmen_id'],
+                        $routineId,
+                        $targetDate,
+                        $routine['baslangic_saati'],
+                        $routine['baslangic_saati'],
+                        $routine['program_tipi'],
+                        $routine['ders'],
+                        $routine['konu'] ?? null,
+                        $routine['kaynak'] ?? null,
+                        $routine['aciklama'] ?? null,
+                        $routine['soru_sayisi'] ?? null,
+                        $status,
+                        $dogruValue,
+                        $yanlisValue,
+                        $bosValue
+                    ]);
+                }
+            }
+        }
     } else {
-        if ($dogru !== null || $yanlis !== null || $bos !== null) {
+        // Soru çözümü programları için doğru/yanlış/boş değerlerini her zaman güncelle
+        // Eğer değerler gönderilmişse (array_key_exists ile kontrol ediyoruz, 0 değeri de geçerli)
+        if (array_key_exists('dogru', $data) || array_key_exists('yanlis', $data) || array_key_exists('bos', $data)) {
             $query = "UPDATE ogrenci_programlari SET durum = ?, dogru = ?, yanlis = ?, bos = ? WHERE id = ?";
             $stmt = $db->prepare($query);
-            $success = $stmt->execute([$status, $dogru, $yanlis, $bos, $programId]);
+            // null değerleri 0 olarak kaydet (çünkü 0 geçerli bir değer)
+            $dogruValue = $dogru !== null ? $dogru : 0;
+            $yanlisValue = $yanlis !== null ? $yanlis : 0;
+            $bosValue = $bos !== null ? $bos : 0;
+            
+            // Debug için log
+            error_log("Updating program $programId with dogru=$dogruValue, yanlis=$yanlisValue, bos=$bosValue, status=$status");
+            
+            $success = $stmt->execute([$status, $dogruValue, $yanlisValue, $bosValue, $programId]);
+            
+            if (!$success) {
+                $errorInfo = $stmt->errorInfo();
+                error_log("Update failed: " . print_r($errorInfo, true));
+            }
         } else {
+            // Sadece durum güncelle
             $query = "UPDATE ogrenci_programlari SET durum = ? WHERE id = ?";
             $stmt = $db->prepare($query);
             $success = $stmt->execute([$status, $programId]);

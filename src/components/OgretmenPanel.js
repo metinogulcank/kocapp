@@ -61,6 +61,16 @@ import tumKimyaImg from '../assets/tum_kimya.png';
 import tumMatematikImg from '../assets/tum_matematik.png';
 import tumTurkceImg from '../assets/tum_turkce.png';
 
+const API_BASE = process.env.REACT_APP_API_URL || 'https://vedatdaglarmuhendislik.com.tr';
+
+// Alan kodunu (yks_say vb.) okunur etikete çevir
+const formatAreaLabel = (area) => {
+  if (!area) return '';
+  const allOptions = EXAM_CATEGORY_OPTIONS.flatMap(group => group.options || []);
+  const found = allOptions.find(opt => opt.value === area);
+  return found ? found.label : area;
+};
+
 const OgretmenPanel = () => {
   const navigate = useNavigate();
   const [activeMenu, setActiveMenu] = useState('ogrenciler');
@@ -245,6 +255,70 @@ const MEETING_DAY_OPTIONS = [
   const [updateSuccess, setUpdateSuccess] = useState('');
   const [editStuUploading, setEditStuUploading] = useState(false);
   const [deletingStudentId, setDeletingStudentId] = useState(null);
+  const [studentsEtutLoading, setStudentsEtutLoading] = useState(false);
+
+  // Öğrencilerin etüt istatistiklerini haftalık olarak çek
+  const fetchEtutStatsForStudents = async (studentList) => {
+    if (!studentList || studentList.length === 0) return;
+    try {
+      setStudentsEtutLoading(true);
+
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+      const weekStart = new Date(today.setDate(diff));
+      weekStart.setHours(0, 0, 0, 0);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      const startDateStr = weekStart.toISOString().split('T')[0];
+      const endDateStr = weekEnd.toISOString().split('T')[0];
+
+      const updated = await Promise.all(
+        studentList.map(async (stu) => {
+          try {
+            const res = await fetch(
+              `${API_BASE}/php-backend/api/get_student_program.php?studentId=${stu.id}&startDate=${startDateStr}&endDate=${endDateStr}`
+            );
+            const data = await res.json();
+            if (data.success && data.programs) {
+              let yapilan = 0;
+              let yapilmayan = 0;
+              let toplam = 0;
+
+              data.programs.forEach((prog) => {
+                toplam++;
+                if (prog.durum === 'yapildi') {
+                  yapilan++;
+                } else {
+                  yapilmayan++;
+                }
+              });
+
+              const completedPct = toplam > 0 ? Math.round((yapilan / toplam) * 100) : 0;
+
+              return {
+                ...stu,
+                overdue: yapilmayan,
+                completed: completedPct
+              };
+            }
+          } catch (err) {
+            console.error('Öğrenci etüt istatistiği alınamadı:', stu.id, err);
+          }
+          return stu;
+        })
+      );
+
+      setStudents(updated);
+    } catch (err) {
+      console.error('Öğrencilerin etüt istatistikleri yüklenemedi:', err);
+    } finally {
+      setStudentsEtutLoading(false);
+    }
+  };
 
   // Günlük soru istatistikleri için state
   const [questionStats, setQuestionStats] = useState({
@@ -321,13 +395,14 @@ const MEETING_DAY_OPTIONS = [
   const bransAreaRaw = bransDenemeForm.alan || selectedStudent?.alan || '';
   const bransArea = (bransAreaRaw || '').toLowerCase();
   const bransIsYks = bransArea.startsWith('yks');
-  // Ders listesini TYT/AYT'ye göre filtrele
-  const bransDersListRaw = bransIsYks ? (EXAM_SUBJECTS_BY_AREA[bransArea] || []) : [];
+  const bransHasSubjects = !!EXAM_SUBJECTS_BY_AREA[bransArea];
+  // Ders listesini al: YKS ise TYT/AYT'ye göre filtrele, diğer alanlarda doğrudan kullan
+  const bransDersListRaw = bransHasSubjects ? (EXAM_SUBJECTS_BY_AREA[bransArea] || []) : [];
   const bransDersList = bransIsYks 
     ? (bransExamType === 'tyt' 
         ? bransDersListRaw.filter(d => d.startsWith('TYT '))
         : bransDersListRaw.filter(d => d.startsWith('AYT ')))
-    : [];
+    : bransDersListRaw;
 
   // Ders/Konu bazlı başarım için state
   const [dersBasariStats, setDersBasariStats] = useState({});
@@ -392,31 +467,41 @@ const MEETING_DAY_OPTIONS = [
       return;
     }
     
-    fetch(`https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_teacher_students.php?teacherId=${user.id}`)
+    fetch(`${API_BASE}/php-backend/api/get_teacher_students.php?teacherId=${user.id}`)
       .then(r => r.json())
       .then(data => {
         if (data.students) {
+          const now = new Date();
           // Backend formatını frontend formatına çevir
-          const formattedStudents = data.students.map(s => ({
-            id: s.id,
-            name: `${s.firstName} ${s.lastName}`,
-            class: s.className,
-            alan: s.alan || null,
-            online: s.online_status === 1 || s.online_status === '1' || s.online_status === true,
-            overdue: 0, // Varsayılan
-            completed: 0, // Varsayılan
-            photo: s.profilePhoto || null,
-            email: s.email,
-            phone: s.phone,
-            meetingDay: (() => {
-              const raw = s.meetingDay ?? s.meeting_day ?? s.gorusmeGunu ?? s.gorusme_gunu;
-              const parsed = parseInt(raw, 10);
-              return Number.isFinite(parsed) && parsed >= 1 && parsed <= 7 ? parsed : 1;
-            })(),
-            meetingDate: s.meetingDate ?? s.meeting_date ?? null,
-            sonGirisTarihi: s.son_giris_tarihi || null
-          }));
+          const formattedStudents = data.students.map(s => {
+            const lastSeen = s.son_giris_tarihi ? new Date(s.son_giris_tarihi) : null;
+            const diffMinutes = lastSeen ? (now - lastSeen) / 60000 : Number.POSITIVE_INFINITY;
+            const isOnlineFlag = s.online_status === 1 || s.online_status === '1' || s.online_status === true;
+            const isOnline = isOnlineFlag && diffMinutes <= 5; // 5 dk içinde aktifse online
+
+            return {
+              id: s.id,
+              name: `${s.firstName} ${s.lastName}`,
+              class: s.className,
+              alan: s.alan || null,
+              online: isOnline,
+              overdue: 0, // Varsayılan
+              completed: 0, // Varsayılan
+              photo: s.profilePhoto || null,
+              email: s.email,
+              phone: s.phone,
+              meetingDay: (() => {
+                const raw = s.meetingDay ?? s.meeting_day ?? s.gorusmeGunu ?? s.gorusme_gunu;
+                const parsed = parseInt(raw, 10);
+                return Number.isFinite(parsed) && parsed >= 1 && parsed <= 7 ? parsed : 1;
+              })(),
+              meetingDate: s.meetingDate ?? s.meeting_date ?? null,
+              sonGirisTarihi: s.son_giris_tarihi || null
+            };
+          });
           setStudents(formattedStudents);
+          // Öğrenciler yüklendikten sonra etüt istatistiklerini getir
+          fetchEtutStatsForStudents(formattedStudents);
         }
         setStudentsLoading(false);
       })
@@ -1295,12 +1380,12 @@ const MEETING_DAY_OPTIONS = [
       alert('Öğrenci seçilmedi');
       return;
     }
-    if (!area.startsWith('yks')) {
-      alert('Branş denemesi sadece YKS öğrencileri için kullanılabilir');
+    if (!area) {
+      alert('Öğrenci alanı belirtilmemiş');
       return;
     }
     if (!bransDenemeForm.ders || !bransDenemeForm.denemeAdi || !bransDenemeForm.denemeTarihi) {
-      alert('Alan, ders, deneme adı ve tarih zorunludur');
+      alert('Ders, deneme adı ve tarih zorunludur');
       return;
     }
     const payloadKonular = bransKonular.map((k, idx) => {
@@ -1377,6 +1462,68 @@ const MEETING_DAY_OPTIONS = [
     }
   };
 
+  const bransBasariColor = (yuzde) => {
+    const clamped = Math.max(0, Math.min(100, yuzde || 0));
+    const red = Math.round(239 - (clamped / 100) * 139); // 239 -> 100
+    const green = Math.round(68 + (clamped / 100) * 113); // 68 -> 181
+    return `rgb(${red}, ${green}, 68)`;
+  };
+
+  const genelNetColor = (net, maxNet) => {
+    const denom = maxNet > 0 ? maxNet : 1;
+    const ratio = Math.max(0, Math.min(1, net / denom));
+    const red = Math.round(239 - ratio * 139); // 239 -> 100
+    const green = Math.round(68 + ratio * 113); // 68 -> 181
+    return `rgb(${red}, ${green}, 68)`;
+  };
+
+  // Branş denemeleri – ders bazlı ortalamalar
+  const bransAggregatedByDers = useMemo(() => {
+    const dersMap = {};
+    bransDenemeList.forEach((d) => {
+      const ders = d.ders || 'Bilinmeyen';
+      if (!dersMap[ders]) {
+        dersMap[ders] = {
+          ders,
+          denemeSayisi: 0,
+          netToplam: 0,
+          dogruToplam: 0,
+          yanlisToplam: 0,
+          bosToplam: 0,
+          konular: {}
+        };
+      }
+      const entry = dersMap[ders];
+      entry.denemeSayisi += 1;
+      entry.netToplam += Number(d.net) || 0;
+      entry.dogruToplam += Number(d.dogru) || 0;
+      entry.yanlisToplam += Number(d.yanlis) || 0;
+      entry.bosToplam += Number(d.bos) || 0;
+      if (Array.isArray(d.konular)) {
+        d.konular.forEach((k) => {
+          const konuKey = k.konu || 'Konu';
+          if (!entry.konular[konuKey]) {
+            entry.konular[konuKey] = { sum: 0, count: 0 };
+          }
+          entry.konular[konuKey].sum += Number(k.basariYuzde) || 0;
+          entry.konular[konuKey].count += 1;
+        });
+      }
+    });
+    return Object.values(dersMap).map((entry) => ({
+      ders: entry.ders,
+      denemeSayisi: entry.denemeSayisi,
+      ortNet: entry.denemeSayisi ? parseFloat((entry.netToplam / entry.denemeSayisi).toFixed(2)) : 0,
+      ortDogru: entry.denemeSayisi ? parseFloat((entry.dogruToplam / entry.denemeSayisi).toFixed(2)) : 0,
+      ortYanlis: entry.denemeSayisi ? parseFloat((entry.yanlisToplam / entry.denemeSayisi).toFixed(2)) : 0,
+      ortBos: entry.denemeSayisi ? parseFloat((entry.bosToplam / entry.denemeSayisi).toFixed(2)) : 0,
+      konuAverages: Object.entries(entry.konular).map(([konu, agg]) => ({
+        konu,
+        ortBasari: agg.count ? Math.round(agg.sum / agg.count) : 0
+      }))
+    }));
+  }, [bransDenemeList]);
+
   // Genel deneme helper fonksiyonları
   const isGenelDenemeDegerlendirmeTamamlandi = () => {
     return genelDenemeDegerlendirme.zamanYeterli !== null &&
@@ -1420,7 +1567,15 @@ const MEETING_DAY_OPTIONS = [
           denemeAdi: genelDenemeForm.denemeAdi,
           denemeTarihi: genelDenemeForm.denemeTarihi,
           notlar: genelDenemeForm.notlar || '',
-          sinavTipi: genelDenemeForm.sinavTipi || 'tyt',
+          sinavTipi: (() => {
+            const studentAreaRaw = selectedStudent?.alan || '';
+            const studentArea = (studentAreaRaw || '').toLowerCase();
+            const isYks = studentArea.startsWith('yks');
+            if (!isYks) {
+              return studentArea || 'lgs'; // LGS veya diğer alanlar için alan kodunu kullan
+            }
+            return genelDenemeForm.sinavTipi || 'tyt';
+          })(),
           dersSonuclari,
           degerlendirme: genelDenemeDegerlendirme
         })
@@ -1509,32 +1664,50 @@ const MEETING_DAY_OPTIONS = [
       
       let toplamNet = 0;
       Object.entries(dersSonuclari).forEach(([ders, data]) => {
+        // net değerini güvenli bir şekilde parse et
+        let netValue = 0;
+        if (data && data.net !== undefined && data.net !== null) {
+          netValue = parseFloat(data.net) || 0;
+        }
+        
         if (sinavTipi === 'tyt' && ders.startsWith('TYT ')) {
-          toplamNet += Number(data.net) || 0;
+          toplamNet += netValue;
         } else if (sinavTipi === 'ayt' && ders.startsWith('AYT ')) {
-          toplamNet += Number(data.net) || 0;
+          toplamNet += netValue;
         }
       });
 
-      if (sinavTipi === 'tyt' && toplamNet > 0) {
+      // sinavTipi'ne göre say, toplamNet > 0 kontrolünü kaldır (0 net olsa bile sayılmalı)
+      if (sinavTipi === 'tyt') {
         tytToplamNet += toplamNet;
         tytSayisi++;
-      } else if (sinavTipi === 'ayt' && toplamNet > 0) {
+      } else if (sinavTipi === 'ayt') {
         aytToplamNet += toplamNet;
         aytSayisi++;
       }
     });
 
-    const tytOrtalama = tytSayisi > 0 ? Math.round(tytToplamNet / tytSayisi) : 0;
-    const aytOrtalama = aytSayisi > 0 ? Math.round(aytToplamNet / aytSayisi) : 0;
+    const tytOrtalama = tytSayisi > 0 ? parseFloat((tytToplamNet / tytSayisi).toFixed(2)) : 0;
+    const aytOrtalama = aytSayisi > 0 ? parseFloat((aytToplamNet / aytSayisi).toFixed(2)) : 0;
 
     return { tytOrtalama, aytOrtalama };
   }, [genelDenemeList, genelDenemeFilter]);
 
-  // Genel denemeler sekmesine girildiğinde verileri yükle
+  // Genel denemeler sekmesine girildiğinde verileri yükle ve formu sıfırla
   useEffect(() => {
     if (activeMenu === 'genel-denemeler' && selectedStudent) {
       fetchGenelDenemeler();
+      // Öğrencinin alanına göre formu sıfırla
+      const studentAreaRaw = selectedStudent?.alan || '';
+      const studentArea = (studentAreaRaw || '').toLowerCase();
+      const isYks = studentArea.startsWith('yks');
+      setGenelDenemeForm({ 
+        denemeAdi: '', 
+        denemeTarihi: '', 
+        notlar: '', 
+        sinavTipi: isYks ? 'tyt' : (studentArea || 'lgs')
+      });
+      setGenelDenemeDersler({});
     }
   }, [activeMenu, selectedStudent]);
 
@@ -4954,8 +5127,10 @@ const MEETING_DAY_OPTIONS = [
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 20}}>
                     <div>
                       <h2 style={{fontSize: 28, fontWeight: 700, margin: 0, color: '#111827'}}>Branş Denemeleri</h2>
-                      <p style={{margin: '6px 0 0', color: '#6b7280'}}>YKS öğrencileri için branş denemesi sonucu ekle, konu bazlı başarıyı takip et.</p>
-                            </div>
+                      <p style={{margin: '6px 0 0', color: '#6b7280'}}>
+                        Branş denemesi sonucu ekle, konu bazlı başarıyı takip et.
+                      </p>
+                    </div>
                     <div style={{display: 'flex', gap: 12}}>
                     <button 
                         onClick={() => setBransView('entry')}
@@ -4991,38 +5166,34 @@ const MEETING_DAY_OPTIONS = [
                         </div>
                       </div>
 
-                  {!bransIsYks && (
-                    <div style={{padding: 16, borderRadius: 10, background: '#fef2f2', color: '#991b1b', marginBottom: 20}}>
-                      Bu sekme yalnızca YKS öğrencileri için aktiftir. Öğrencinin alanı: {bransAreaRaw || 'Belirtilmemiş'}.
-                  </div>
-                )}
 
                   {bransView === 'entry' ? (
                     <div style={{background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
                       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16, marginBottom: 20}}>
-                        <div>
-                          <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
-                          <select
-                            value={bransExamType}
-                            onChange={(e) => {
-                              setBransExamType(e.target.value);
-                              setBransDenemeForm((prev) => ({ ...prev, ders: '' }));
-                              setBransKonular([]);
-                              setBransKonuDetayAcik(false);
-                            }}
-                            disabled={!bransIsYks}
-                            style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', background: bransIsYks ? 'white' : '#f3f4f6'}}
-                          >
-                            <option value="tyt">TYT</option>
-                            <option value="ayt">AYT</option>
-                          </select>
-                        </div>
+                        {bransIsYks && (
+                          <div>
+                            <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
+                            <select
+                              value={bransExamType}
+                              onChange={(e) => {
+                                setBransExamType(e.target.value);
+                                setBransDenemeForm((prev) => ({ ...prev, ders: '' }));
+                                setBransKonular([]);
+                                setBransKonuDetayAcik(false);
+                              }}
+                              style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', background: 'white'}}
+                            >
+                              <option value="tyt">TYT</option>
+                              <option value="ayt">AYT</option>
+                            </select>
+                          </div>
+                        )}
                         <div>
                           <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Ders Seçimi</label>
                           <select
                             value={bransDenemeForm.ders}
                             onChange={(e) => handleBransFormChange('ders', e.target.value)}
-                            disabled={!bransIsYks}
+                            disabled={!bransHasSubjects}
                             style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', background: 'white'}}
                           >
                             <option value="">Ders seçin</option>
@@ -5097,8 +5268,15 @@ const MEETING_DAY_OPTIONS = [
                         Yanlış / Boş Konuları Gir
                       </button>
 
-                      {bransKonuDetayAcik && (
-                        <div style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, maxHeight: 420, overflow: 'auto', marginBottom: 16}}>
+                    {bransKonuDetayAcik && (
+                      <div style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, maxHeight: 420, overflow: 'auto', marginBottom: 16}}>
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr repeat(3,120px) 100px', gap: 12, padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontWeight: 700, color: '#374151'}}>
+                          <div>Konu</div>
+                          <div>Doğru</div>
+                          <div>Yanlış</div>
+                          <div>Boş</div>
+                          <div style={{textAlign: 'right'}}>Başarı %</div>
+                        </div>
                           {bransKonular.length === 0 && (
                             <div style={{padding: 20, textAlign: 'center', color: '#6b7280'}}>Önce ders seçin.</div>
                           )}
@@ -5156,110 +5334,91 @@ const MEETING_DAY_OPTIONS = [
                     </div>
                   ) : (
                     <div style={{background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
-                      {bransDenemelerLoading ? (
-                        <div style={{padding: 40, textAlign: 'center'}}>Yükleniyor...</div>
-                      ) : bransDenemeList.length === 0 ? (
-                        <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Henüz kayıtlı branş denemesi yok.</div>
-                      ) : (
-                        <>
-                          <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16}}>
-                            {Array.from(new Set(bransDenemeList.map((d) => d.ders))).map((ders) => (
-                              <button
-                                key={ders}
-                                onClick={() => setBransChartsSelectedDers(ders)}
-                                style={{
-                                  padding: '10px 12px',
-                                  borderRadius: 10,
-                                  border: '1px solid #e5e7eb',
-                                  background: bransChartsSelectedDers === ders ? '#eef2ff' : 'white',
-                                  color: '#111827',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {ders}
-                              </button>
-                            ))}
+                    {bransDenemelerLoading ? (
+                      <div style={{padding: 40, textAlign: 'center'}}>Yükleniyor...</div>
+                    ) : bransAggregatedByDers.length === 0 ? (
+                      <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Henüz kayıtlı branş denemesi yok.</div>
+                    ) : (
+                      <div style={{display: 'grid', gap: 16}}>
+                        {bransAggregatedByDers.map((agg) => (
+                          <div key={agg.ders} style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, background: 'white'}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12}}>
+                              <div>
+                                <div style={{fontSize: 18, fontWeight: 800, color: '#111827'}}>{agg.ders}</div>
+                                <div style={{color: '#6b7280', fontSize: 13}}>Deneme Sayısı: {agg.denemeSayisi}</div>
+                              </div>
+                              <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center'}}>
+                                <div style={{background: '#ecfdf3', color: '#065f46', padding: '8px 10px', borderRadius: 10, fontWeight: 700}}>Ort Net: {agg.ortNet}</div>
+                                <div style={{color: '#10b981', fontWeight: 700}}>Ort D:{agg.ortDogru}</div>
+                                <div style={{color: '#f59e0b', fontWeight: 700}}>Ort Y:{agg.ortYanlis}</div>
+                                <div style={{color: '#6b7280', fontWeight: 700}}>Ort B:{agg.ortBos}</div>
+                              </div>
+                            </div>
+                            {agg.konuAverages && agg.konuAverages.length > 0 && (
+                              <div style={{background: 'white', padding: '12px 0', borderRadius: 8}}>
+                                <div style={{display: 'flex', gap: 4, alignItems: 'flex-end', minHeight: 220, padding: '12px 0 32px 0'}}>
+                                  {agg.konuAverages.map((k, idx) => {
+                                    const basariYuzde = Math.round(k.ortBasari || 0);
+                                    const barHeight = Math.max((basariYuzde / 100) * 200, 3);
+                                    const barColor = bransBasariColor(basariYuzde);
+                                    return (
+                                      <div key={`${agg.ders}-${k.konu}-${idx}`} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0}}>
+                                        <div style={{position: 'relative', width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', minHeight: 200}}>
+                                          <div 
+                                            style={{
+                                              width: '100%',
+                                              minWidth: 18,
+                                              maxWidth: 32,
+                                              height: `${barHeight}px`,
+                                              background: barColor,
+                                              borderRadius: '4px 4px 0 0',
+                                              position: 'relative',
+                                              transition: 'height 0.3s ease'
+                                            }}
+                                            title={`${k.konu}: %${basariYuzde}`}
+                                          >
+                                            <div style={{
+                                              position: 'absolute',
+                                              top: -18,
+                                              left: '50%',
+                                              transform: 'translateX(-50%)',
+                                              fontSize: 10,
+                                              fontWeight: 700,
+                                              color: '#111827',
+                                              whiteSpace: 'nowrap'
+                                            }}>
+                                              {basariYuzde}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div style={{
+                                          fontSize: 12,
+                                          fontWeight: 600,
+                                          color: '#111827',
+                                          textAlign: 'center',
+                                          writingMode: 'vertical-rl',
+                                          textOrientation: 'mixed',
+                                          transform: 'rotate(180deg)',
+                                          height: 50,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          wordBreak: 'break-word',
+                                          lineHeight: 1.1,
+                                          maxWidth: 40
+                                        }}>
+                                          {k.konu}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-
-                          {bransDenemeList.filter((d) => !bransChartsSelectedDers || d.ders === bransChartsSelectedDers).map((deneme) => (
-                            <div key={deneme.id} style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 14}}>
-                              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10}}>
-                                <div>
-                                  <div style={{fontSize: 16, fontWeight: 700, color: '#111827'}}>{deneme.denemeAdi}</div>
-                                  <div style={{color: '#6b7280', fontSize: 13}}>{deneme.ders} • {deneme.denemeTarihi}</div>
-                          </div>
-                                <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
-                                  <div style={{background: '#ecfdf3', color: '#065f46', padding: '8px 10px', borderRadius: 10, fontWeight: 700}}>Net: {deneme.net?.toFixed ? deneme.net.toFixed(2) : deneme.net}</div>
-                                  <div style={{color: '#10b981', fontWeight: 700}}>D:{deneme.dogru}</div>
-                                  <div style={{color: '#f59e0b', fontWeight: 700}}>Y:{deneme.yanlis}</div>
-                                  <div style={{color: '#6b7280', fontWeight: 700}}>B:{deneme.bos}</div>
-                          </div>
-                          </div>
-                              {deneme.konular && deneme.konular.length > 0 && (
-                                <div style={{background: 'white', padding: '24px', borderRadius: 12, border: '1px solid #e5e7eb', marginTop: 12}}>
-                                  <div style={{display: 'flex', gap: 2, alignItems: 'flex-end', minHeight: 280, paddingBottom: 40}}>
-                                    {deneme.konular.map((k, idx) => {
-                                      const basariYuzde = Math.round(k.basariYuzde || 0);
-                                      const barHeight = Math.max((basariYuzde / 100) * 240, 3);
-                                      return (
-                                        <div key={k.id || idx} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0}}>
-                                          <div style={{position: 'relative', width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', minHeight: 240}}>
-                                            <div 
-                                              style={{
-                                                width: '100%',
-                                                minWidth: 20,
-                                                maxWidth: 35,
-                                                height: `${barHeight}px`,
-                                                background: '#10b981',
-                                                borderRadius: '4px 4px 0 0',
-                                                position: 'relative',
-                                                transition: 'height 0.3s ease',
-                                                cursor: 'pointer'
-                                              }}
-                                              title={`${k.konu}: %${basariYuzde}`}
-                                            >
-                                              <div style={{
-                                                position: 'absolute',
-                                                top: -18,
-                                                left: '50%',
-                                                transform: 'translateX(-50%)',
-                                                fontSize: 10,
-                                                fontWeight: 700,
-                                                color: '#111827',
-                                                whiteSpace: 'nowrap'
-                                              }}>
-                                                {basariYuzde}
-                        </div>
-                      </div>
-                          </div>
-                                          <div style={{
-                                            fontSize: 9,
-                                            fontWeight: 600,
-                                            color: '#111827',
-                                            textAlign: 'center',
-                                            writingMode: 'vertical-rl',
-                                            textOrientation: 'mixed',
-                                            transform: 'rotate(180deg)',
-                                            height: 60,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            wordBreak: 'break-word',
-                                            lineHeight: 1.1,
-                                            maxWidth: 50
-                                          }}>
-                                            {k.konu}
-                          </div>
-                          </div>
-                                      );
-                                    })}
-                          </div>
-                        </div>
-                              )}
-                      </div>
-                          ))}
-                        </>
-                      )}
+                    )}
                   </div>
                 )}
               </div>
@@ -5293,34 +5452,84 @@ const MEETING_DAY_OPTIONS = [
                     </select>
                   </div>
 
-                  {/* TYT ve AYT Ortalama Kartları */}
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32}}>
-                    {/* TYT Ortalama */}
-                    <div style={{
-                      background: 'white',
-                      borderRadius: 16,
-                      padding: 32,
-                      boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                      border: '1px solid #e5e7eb'
-                    }}>
-                      <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>TYT Deneme Ortalaması</div>
-                      <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.tytOrtalama}</div>
-                      <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                  </div>
+                  {/* Ortalama Kartları - YKS için TYT/AYT, diğerleri için tek kart */}
+                  {(() => {
+                    const studentAreaRaw = selectedStudent?.alan || '';
+                    const studentArea = (studentAreaRaw || '').toLowerCase();
+                    const isYks = studentArea.startsWith('yks');
+                    
+                    // LGS için ortalama hesaplama (tüm denemelerin ortalaması)
+                    let lgsOrtalama = 0;
+                    if (!isYks) {
+                      const filtered = genelDenemeList.filter(d => {
+                        if (genelDenemeFilter === 'son-deneme') return true;
+                        const count = parseInt(genelDenemeFilter.replace('son-', ''));
+                        return genelDenemeList.indexOf(d) < count;
+                      });
+                      if (filtered.length > 0) {
+                        const toplamNet = filtered.reduce((sum, d) => {
+                          const dersler = d.dersler || {};
+                          return sum + Object.values(dersler).reduce((dersSum, dersData) => {
+                            return dersSum + (Number(dersData.net) || 0);
+                          }, 0);
+                        }, 0);
+                        const toplamDers = filtered.reduce((sum, d) => {
+                          return sum + Object.keys(d.dersler || {}).length;
+                        }, 0);
+                        lgsOrtalama = toplamDers > 0 ? parseFloat((toplamNet / toplamDers).toFixed(2)) : 0;
+                      }
+                    }
 
-                    {/* AYT Ortalama */}
-                    <div style={{
-                      background: 'white',
-                      borderRadius: 16,
-                      padding: 32,
-                      boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                      border: '1px solid #e5e7eb'
-                    }}>
-                      <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>AYT Deneme Ortalaması</div>
-                      <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.aytOrtalama}</div>
-                      <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                    </div>
-                  </div>
+                    if (isYks) {
+                      return (
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32}}>
+                          {/* TYT Ortalama */}
+                          <div style={{
+                            background: 'white',
+                            borderRadius: 16,
+                            padding: 32,
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                            border: '1px solid #e5e7eb'
+                          }}>
+                            <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>TYT Deneme Ortalaması</div>
+                            <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.tytOrtalama}</div>
+                            <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
+                          </div>
+
+                          {/* AYT Ortalama */}
+                          <div style={{
+                            background: 'white',
+                            borderRadius: 16,
+                            padding: 32,
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                            border: '1px solid #e5e7eb'
+                          }}>
+                            <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>AYT Deneme Ortalaması</div>
+                            <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.aytOrtalama}</div>
+                            <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr', gap: 24, marginBottom: 32, maxWidth: 600}}>
+                          <div style={{
+                            background: 'white',
+                            borderRadius: 16,
+                            padding: 32,
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                            border: '1px solid #e5e7eb'
+                          }}>
+                            <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>
+                              {studentArea === 'lgs' ? 'LGS' : formatAreaLabel(studentAreaRaw)} Deneme Ortalaması
+                            </div>
+                            <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{lgsOrtalama}</div>
+                            <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  })()}
 
                   {/* Alt Butonlar */}
                   <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20}}>
@@ -5447,27 +5656,31 @@ const MEETING_DAY_OPTIONS = [
                     </button>
                   </div>
                       {(() => {
-                        const studentArea = selectedStudent?.alan || '';
-                        const genelDenemeDersList = studentArea ? (EXAM_SUBJECTS_BY_AREA[studentArea] || []) : [];
+                        const studentAreaRaw = selectedStudent?.alan || '';
+                        const studentArea = (studentAreaRaw || '').toLowerCase();
+                        const isYks = studentArea.startsWith('yks');
+                        const genelDenemeDersList = studentAreaRaw ? (EXAM_SUBJECTS_BY_AREA[studentAreaRaw] || []) : [];
                         
                         return (
                           <>
                             {/* Deneme Bilgileri */}
-                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 24}}>
-                              <div>
-                                <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
-                                <select
-                                  value={genelDenemeForm.sinavTipi || 'tyt'}
-                                  onChange={(e) => {
-                                    setGenelDenemeForm(prev => ({ ...prev, sinavTipi: e.target.value }));
-                                    setGenelDenemeDersler({});
-                                  }}
-                                  style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
-                                >
-                                  <option value="tyt">TYT</option>
-                                  <option value="ayt">AYT</option>
-                        </select>
-                      </div>
+                            <div style={{display: 'grid', gridTemplateColumns: isYks ? '1fr 1fr 1fr' : '1fr 1fr', gap: 16, marginBottom: 24}}>
+                              {isYks && (
+                                <div>
+                                  <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
+                                  <select
+                                    value={genelDenemeForm.sinavTipi || 'tyt'}
+                                    onChange={(e) => {
+                                      setGenelDenemeForm(prev => ({ ...prev, sinavTipi: e.target.value }));
+                                      setGenelDenemeDersler({});
+                                    }}
+                                    style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
+                                  >
+                                    <option value="tyt">TYT</option>
+                                    <option value="ayt">AYT</option>
+                                  </select>
+                                </div>
+                              )}
                               <div>
                                 <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Deneme Adı</label>
                                 <input
@@ -5494,6 +5707,7 @@ const MEETING_DAY_OPTIONS = [
                               <h4 style={{fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16}}>Ders Sonuçları</h4>
                               <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16}}>
                                 {genelDenemeDersList.filter((ders) => {
+                                  if (!isYks) return true; // YKS değilse tüm dersleri göster
                                   const sinavTipi = genelDenemeForm.sinavTipi || 'tyt';
                                   return sinavTipi === 'tyt' ? ders.startsWith('TYT ') : ders.startsWith('AYT ');
                                 }).map((ders) => {
@@ -5903,13 +6117,14 @@ const MEETING_DAY_OPTIONS = [
                                     const net = Number(data.net) || 0;
                                     const maxNet = Math.max(...Object.values(deneme.dersSonuclari || {}).map(d => Number(d.net) || 0), 1);
                                     const height = maxNet > 0 ? (net / maxNet) * 180 : 0;
+                                    const barColor = genelNetColor(net, maxNet);
                                     return (
                                       <div key={ders} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4}}>
                                         <div
                                           style={{
                                             width: '100%',
                                             height: `${Math.max(height, 3)}px`,
-                                            background: '#10b981',
+                                            background: barColor,
                                             borderRadius: '4px 4px 0 0',
                                             position: 'relative'
                                           }}
@@ -5929,7 +6144,8 @@ const MEETING_DAY_OPTIONS = [
                           </div>
                         </div>
                                         <div style={{
-                                          fontSize: 9,
+                                          fontSize: 12,
+                                          margin: '12px 0',
                                           fontWeight: 600,
                                           color: '#111827',
                                           textAlign: 'center',
@@ -5982,445 +6198,448 @@ const MEETING_DAY_OPTIONS = [
                           </div>
                         </div>
             ) : activeMenu === 'yapay-zeka' ? (
-              <div className="yapay-zeka-content">
-                {/* Başlık ve Tarih */}
-                <div className="welcome-section">
-                  <div className="welcome-text">
-                    <h1 className="welcome-title">Yapay Zeka - {selectedStudent.name}</h1>
-                    <p className="welcome-subtitle">AI destekli öğrenci analizi ve öneriler</p>
-                      </div>
-                  <div className="current-date">
-                    {new Date().toLocaleDateString('tr-TR', { 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
-                    })}
-                    </div>
-                  </div>
-              </div>
-            ) : activeMenu === 'yapay-zeka' ? (
-              <div className="yapay-zeka-content">
-                {/* Başlık ve Tarih */}
-                <div className="welcome-section">
-                  <div className="welcome-text">
-                    <h1 className="welcome-title">Yapay Zeka Asistanı - {selectedStudent.name}</h1>
-                    <p className="welcome-subtitle">AI destekli öğrenci analizi ve kişiselleştirilmiş öneriler</p>
-                  </div>
-                  <div className="current-date">
-                    {new Date().toLocaleDateString('tr-TR', { 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
-                    })}
-                  </div>
-                </div>
+              <div className="yapay-zeka-content" style={{padding: '32px', background: '#fafafa', minHeight: 'calc(100vh - 200px)'}}>
+                <div style={{maxWidth: '1400px', margin: '0 auto'}}>
+                  {/* Başlık */}
+                  <h1 style={{fontSize: 32, fontWeight: 700, margin: '0 0 32px 0', color: '#111827'}}>Yapay Zeka Asistanı</h1>
 
-                {/* Yapay Zeka Kartları */}
-                <div className="dashboard-cards">
-                  <div className="dashboard-card">
-                    <div className="card-icon">
-                      <FontAwesomeIcon icon={faRobot} />
-                    </div>
-                    <div className="card-content">
-                      <h3>AI Analiz Puanı</h3>
-                      <div className="card-number">8.7</div>
-                      <div className="card-subtitle">Genel performans</div>
-                      <div className="progress-circle">
-                        <div className="progress-fill" style={{ '--progress': '87%' }}></div>
+                  {/* Yapay Zeka Metrik Kartları */}
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 24, marginBottom: 32}}>
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 16}}>
+                      <div style={{width: 56, height: 56, borderRadius: 12, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 24, flexShrink: 0}}>
+                        <FontAwesomeIcon icon={faRobot} />
+                      </div>
+                      <div style={{flex: 1}}>
+                        <div style={{fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 4}}>AI Analiz Puanı</div>
+                        <div style={{fontSize: 32, fontWeight: 800, color: '#111827', lineHeight: 1}}>8.7</div>
+                        <div style={{fontSize: 12, color: '#6b7280', marginTop: 4}}>Genel performans</div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="dashboard-card">
-                    <div className="card-icon">
-                      <FontAwesomeIcon icon={faChartLine} />
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 16}}>
+                      <div style={{width: 56, height: 56, borderRadius: 12, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 24, flexShrink: 0}}>
+                        <FontAwesomeIcon icon={faChartLine} />
+                      </div>
+                      <div style={{flex: 1}}>
+                        <div style={{fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 4}}>Öğrenme Hızı</div>
+                        <div style={{fontSize: 32, fontWeight: 800, color: '#111827', lineHeight: 1}}>%92</div>
+                        <div style={{fontSize: 12, color: '#6b7280', marginTop: 4}}>Konu kavrama</div>
+                      </div>
                     </div>
-                    <div className="card-content">
-                      <h3>Öğrenme Hızı</h3>
-                      <div className="card-number">%92</div>
-                      <div className="card-subtitle">Konu kavrama</div>
-                    </div>
-                  </div>
 
-                  <div className="dashboard-card">
-                    <div className="card-icon">
-                      <FontAwesomeIcon icon={faBullseye} />
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 16}}>
+                      <div style={{width: 56, height: 56, borderRadius: 12, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 24, flexShrink: 0}}>
+                        <FontAwesomeIcon icon={faBullseye} />
+                      </div>
+                      <div style={{flex: 1}}>
+                        <div style={{fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 4}}>Hedef Uygunluğu</div>
+                        <div style={{fontSize: 32, fontWeight: 800, color: '#111827', lineHeight: 1}}>%85</div>
+                        <div style={{fontSize: 12, color: '#6b7280', marginTop: 4}}>Üniversite hedefi</div>
+                      </div>
                     </div>
-                    <div className="card-content">
-                      <h3>Hedef Uygunluğu</h3>
-                      <div className="card-number">%85</div>
-                      <div className="card-subtitle">Üniversite hedefi</div>
-                      <div className="progress-circle orange">
-                        <div className="progress-fill" style={{ '--progress': '85%' }}></div>
+
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 16}}>
+                      <div style={{width: 56, height: 56, borderRadius: 12, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 24, flexShrink: 0}}>
+                        <FontAwesomeIcon icon={faStickyNote} />
+                      </div>
+                      <div style={{flex: 1}}>
+                        <div style={{fontSize: 14, fontWeight: 600, color: '#6b7280', marginBottom: 4}}>AI Önerileri</div>
+                        <div style={{fontSize: 32, fontWeight: 800, color: '#111827', lineHeight: 1}}>12</div>
+                        <div style={{fontSize: 12, color: '#6b7280', marginTop: 4}}>Aktif öneri</div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="dashboard-card">
-                    <div className="card-icon">
-                      <FontAwesomeIcon icon={faStickyNote} />
-                    </div>
-                    <div className="card-content">
-                      <h3>AI Önerileri</h3>
-                      <div className="card-number">12</div>
-                      <div className="card-subtitle">Aktif öneri</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tab Sistemi */}
-                <div className="tabs-section">
-                  <div className="tabs">
+                  {/* Tab Sistemi */}
+                  <div style={{display: 'flex', gap: 8, marginBottom: 32, borderBottom: '2px solid #e5e7eb'}}>
                     <button 
-                      className={`tab ${activeTab === 'ai-chat' ? 'active' : ''}`}
                       onClick={() => setActiveTab('ai-chat')}
+                      style={{
+                        padding: '12px 24px',
+                        border: 'none',
+                        background: 'transparent',
+                        color: activeTab === 'ai-chat' ? '#6a1b9a' : '#6b7280',
+                        fontWeight: activeTab === 'ai-chat' ? 700 : 500,
+                        fontSize: 16,
+                        cursor: 'pointer',
+                        borderBottom: activeTab === 'ai-chat' ? '2px solid #6a1b9a' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        transition: 'all 0.2s'
+                      }}
                     >
-                      AI Asistanı
+                      Chatbot
                     </button>
                     <button 
-                      className={`tab ${activeTab === 'akilli-analiz' ? 'active' : ''}`}
                       onClick={() => setActiveTab('akilli-analiz')}
+                      style={{
+                        padding: '12px 24px',
+                        border: 'none',
+                        background: 'transparent',
+                        color: activeTab === 'akilli-analiz' ? '#6a1b9a' : '#6b7280',
+                        fontWeight: activeTab === 'akilli-analiz' ? 700 : 500,
+                        fontSize: 16,
+                        cursor: 'pointer',
+                        borderBottom: activeTab === 'akilli-analiz' ? '2px solid #6a1b9a' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        transition: 'all 0.2s'
+                      }}
                     >
                       Akıllı Analiz
                     </button>
                     <button 
-                      className={`tab ${activeTab === 'ai-raporlar' ? 'active' : ''}`}
                       onClick={() => setActiveTab('ai-raporlar')}
+                      style={{
+                        padding: '12px 24px',
+                        border: 'none',
+                        background: 'transparent',
+                        color: activeTab === 'ai-raporlar' ? '#6a1b9a' : '#6b7280',
+                        fontWeight: activeTab === 'ai-raporlar' ? 700 : 500,
+                        fontSize: 16,
+                        cursor: 'pointer',
+                        borderBottom: activeTab === 'ai-raporlar' ? '2px solid #6a1b9a' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        transition: 'all 0.2s'
+                      }}
                     >
                       AI Raporları
                     </button>
                   </div>
-                </div>
 
-                {/* AI Asistanı Sekmesi */}
+                {/* Chatbot Sekmesi */}
                 {activeTab === 'ai-chat' && (
-                  <div className="ai-chat-section">
-                    <div className="section-header">
-                      <h2>AI Asistanı</h2>
-                      <div className="ai-status">
-                        <span className="status-indicator online"></span>
-                        <span className="status-text">Çevrimiçi</span>
+                  <div className="ai-chat-section" style={{display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24}}>
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                      <div className="section-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24}}>
+                        <div>
+                          <h2 style={{fontSize: 24, fontWeight: 700, margin: 0, color: '#111827'}}>Kocapp AI</h2>
+                          <p style={{fontSize: 14, color: '#6b7280', margin: '4px 0 0'}}>Yapay zekayla konuş, öğrenciye özel yanıtlar al.</p>
+                        </div>
+                        <div className="ai-status" style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                          <span className="status-indicator online" style={{width: 8, height: 8, borderRadius: '50%', background: '#10b981'}}></span>
+                          <span className="status-text" style={{fontSize: 14, color: '#10b981', fontWeight: 600}}>Çevrimiçi</span>
+                        </div>
+                      </div>
+
+                      <div className="chat-container" style={{display: 'flex', flexDirection: 'column', height: '600px'}}>
+                        <div className="chat-messages" style={{flex: 1, overflowY: 'auto', padding: '16px 0', marginBottom: 16}}>
+                          <div className="message ai-message" style={{display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start'}}>
+                            <div className="message-avatar" style={{width: 40, height: 40, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6a1b9a', flexShrink: 0}}>
+                              <FontAwesomeIcon icon={faRobot} />
+                            </div>
+                            <div className="message-content" style={{flex: 1, background: '#f9fafb', padding: '12px 16px', borderRadius: 12, maxWidth: '80%'}}>
+                              <p style={{margin: 0, color: '#111827', fontSize: 14, lineHeight: 1.5}}>Merhaba! Öğrencinin son denemelerine göre hangi konuda destek istersin? Net artışı, konu önceliği veya günlük plan önerebilirim.</p>
+                              <span className="message-time" style={{fontSize: 12, color: '#6b7280', marginTop: 8, display: 'block'}}>1 dk önce</span>
+                            </div>
+                          </div>
+
+                          <div className="message user-message" style={{display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start', justifyContent: 'flex-end'}}>
+                            <div className="message-content" style={{flex: 1, background: '#6a1b9a', padding: '12px 16px', borderRadius: 12, maxWidth: '80%', textAlign: 'right'}}>
+                              <p style={{margin: 0, color: 'white', fontSize: 14, lineHeight: 1.5}}>Son TYT denemesindeki zayıf konular neler?</p>
+                              <span className="message-time" style={{fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 8, display: 'block'}}>Şimdi</span>
+                            </div>
+                            <div className="message-avatar" style={{width: 40, height: 40, borderRadius: '50%', background: '#6a1b9a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', flexShrink: 0}}>
+                              <FontAwesomeIcon icon={faUser} />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="chat-input-container" style={{borderTop: '1px solid #e5e7eb', paddingTop: 16}}>
+                          <div className="chat-input-wrapper" style={{display: 'flex', gap: 12}}>
+                            <input 
+                              type="text" 
+                              className="chat-input" 
+                              placeholder="Kocapp AI'ya sorunuzu yazın..."
+                              style={{flex: 1, padding: '12px 16px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                            <button className="send-btn" style={{padding: '12px 24px', borderRadius: 10, border: 'none', background: '#6a1b9a', color: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14}}>
+                              Gönder
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
+                    
+                    {/* Hızlı Komutlar */}
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb', height: 'fit-content'}}>
+                      <h3 style={{fontSize: 18, fontWeight: 700, margin: '0 0 20px', color: '#111827'}}>Hızlı Komutlar</h3>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                        {['Son denemeyi özetle', 'Öncelikli konu öner', 'Günlük çalışma planı yaz', 'Motivasyon mesajı gönder', 'Zayıf derslere kaynak öner'].map((cmd, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {/* Handle quick command */}}
+                            style={{
+                              padding: '12px 16px',
+                              borderRadius: 10,
+                              border: '1px solid #e5e7eb',
+                              background: 'white',
+                              color: '#374151',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              fontSize: 14,
+                              fontWeight: 500,
+                              transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = '#f9fafb';
+                              e.target.style.borderColor = '#6a1b9a';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = 'white';
+                              e.target.style.borderColor = '#e5e7eb';
+                            }}
+                          >
+                            {cmd}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                    <div className="chat-container">
-                      <div className="chat-messages">
-                        <div className="message ai-message">
-                          <div className="message-avatar">
-                            <FontAwesomeIcon icon={faRobot} />
-                          </div>
-                          <div className="message-content">
-                            <p>Merhaba! {selectedStudent.name} için nasıl yardımcı olabilirim? Öğrencinin performansını analiz edebilir, öneriler sunabilir veya sorularınızı yanıtlayabilirim.</p>
-                            <span className="message-time">Az önce</span>
+                  {/* Akıllı Analiz Sekmesi */}
+                  {activeTab === 'akilli-analiz' && (
+                    <div>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24}}>
+                        <h2 style={{fontSize: 28, fontWeight: 700, margin: 0, color: '#111827'}}>Akıllı Analiz</h2>
+                        <button style={{
+                          padding: '10px 20px',
+                          borderRadius: 10,
+                          border: '1px solid #6a1b9a',
+                          background: 'white',
+                          color: '#6a1b9a',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 14,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
+                        }}>
+                          <FontAwesomeIcon icon={faChartLine} />
+                          Analizi Yenile
+                        </button>
+                      </div>
+
+                      <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 24}}>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <h3 style={{fontSize: 20, fontWeight: 700, margin: '0 0 20px', color: '#111827'}}>Öğrenme Profili</h3>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>Öğrenme Stili:</span>
+                              <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Görsel + Pratik</span>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>Konsantrasyon:</span>
+                              <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Yüksek (45-60 dk)</span>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>Hız:</span>
+                              <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Orta-Hızlı</span>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>Zorluk Tercihi:</span>
+                              <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Orta-Zor</span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="message user-message">
-                          <div className="message-content">
-                            <p>Öğrencinin matematik performansı nasıl?</p>
-                            <span className="message-time">2 dakika önce</span>
-                          </div>
-                          <div className="message-avatar">
-                            <FontAwesomeIcon icon={faUser} />
-                          </div>
-                        </div>
-
-                        <div className="message ai-message">
-                          <div className="message-avatar">
-                            <FontAwesomeIcon icon={faRobot} />
-                          </div>
-                          <div className="message-content">
-                            <p>Matematik performansı oldukça iyi! Son 3 denemede ortalama %88 başarı gösteriyor. Köklü sayılar konusunda mükemmel (%95), ancak türev konusunda biraz daha çalışması gerekiyor (%75). Önerim: Türev konusunda ek sorular çözmesi.</p>
-                            <span className="message-time">1 dakika önce</span>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <h3 style={{fontSize: 20, fontWeight: 700, margin: '0 0 20px', color: '#111827'}}>Güçlü Yönler</h3>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                            {[
+                              { icon: '💪', text: 'Matematik problem çözme' },
+                              { icon: '🧠', text: 'Mantık yürütme' },
+                              { icon: '⚡', text: 'Hızlı kavrama' },
+                              { icon: '🎯', text: 'Hedef odaklılık' }
+                            ].map((item, idx) => (
+                              <div key={idx} style={{display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: '#ecfdf3', borderRadius: 8}}>
+                                <span style={{fontSize: 20}}>{item.icon}</span>
+                                <span style={{fontSize: 14, fontWeight: 600, color: '#065f46'}}>{item.text}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
-                        <div className="message user-message">
-                          <div className="message-content">
-                            <p>Hangi konulara odaklanmalı?</p>
-                            <span className="message-time">Az önce</span>
-                          </div>
-                          <div className="message-avatar">
-                            <FontAwesomeIcon icon={faUser} />
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <h3 style={{fontSize: 20, fontWeight: 700, margin: '0 0 20px', color: '#111827'}}>Gelişim Alanları</h3>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                            {[
+                              { icon: '🟦', text: 'Kimya formülleri' },
+                              { icon: '⏱️', text: 'Zaman yönetimi' },
+                              { icon: '🔍', text: 'Detay odaklılık' },
+                              { icon: '📝', text: 'Not tutma' }
+                            ].map((item, idx) => (
+                              <div key={idx} style={{display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: '#fef2f2', borderRadius: 8}}>
+                                <span style={{fontSize: 20}}>{item.icon}</span>
+                                <span style={{fontSize: 14, fontWeight: 600, color: '#991b1b'}}>{item.text}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
-                        <div className="message ai-message">
-                          <div className="message-avatar">
-                            <FontAwesomeIcon icon={faRobot} />
-                          </div>
-                          <div className="message-content">
-                            <p>Öncelik sırasına göre:<br/>
-                            1. <strong>Türev</strong> - %75 → %90 hedef<br/>
-                            2. <strong>İntegral</strong> - Henüz başlamamış<br/>
-                            3. <strong>Limit</strong> - %82, biraz daha pekiştirilmeli<br/><br/>
-                            Haftalık 20-25 türev sorusu öneriyorum.</p>
-                            <span className="message-time">Az önce</span>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <h3 style={{fontSize: 20, fontWeight: 700, margin: '0 0 20px', color: '#111827'}}>AI Önerileri</h3>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
+                            <div style={{borderLeft: '4px solid #dc2626', paddingLeft: 16}}>
+                              <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+                                <span style={{fontSize: 12, fontWeight: 700, color: '#dc2626', background: '#fee2e2', padding: '4px 8px', borderRadius: 4}}>YÜKSEK</span>
+                                <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Türev Konusu</span>
+                              </div>
+                              <p style={{fontSize: 14, color: '#6b7280', margin: 0, lineHeight: 1.5}}>Türev konusunda %75 başarı. Haftalık 20-25 soru ile %90'a çıkarılabilir.</p>
+                            </div>
+                            <div style={{borderLeft: '4px solid #f59e0b', paddingLeft: 16}}>
+                              <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+                                <span style={{fontSize: 12, fontWeight: 700, color: '#f59e0b', background: '#fef3c7', padding: '4px 8px', borderRadius: 4}}>ORTA</span>
+                                <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Zaman Yönetimi</span>
+                              </div>
+                              <p style={{fontSize: 14, color: '#6b7280', margin: 0, lineHeight: 1.5}}>Deneme sınavlarında zaman sıkıntısı yaşıyor. Pomodoro tekniği öneriliyor.</p>
+                            </div>
+                            <div style={{borderLeft: '4px solid #16a34a', paddingLeft: 16}}>
+                              <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+                                <span style={{fontSize: 12, fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '4px 8px', borderRadius: 4}}>DÜŞÜK</span>
+                                <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>Kimya Formülleri</span>
+                              </div>
+                              <p style={{fontSize: 14, color: '#6b7280', margin: 0, lineHeight: 1.5}}>Formül ezberleme teknikleri ve görsel hafıza yöntemleri uygulanabilir.</p>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    </div>
+                  )}
 
-                      <div className="chat-input-container">
-                        <div className="chat-input-wrapper">
-                          <input 
-                            type="text" 
-                            className="chat-input" 
-                            placeholder="AI asistanına soru sorun..."
-                          />
-                          <button className="send-btn">
-                            <FontAwesomeIcon icon={faPaperPlane} />
+                  {/* AI Raporları Sekmesi */}
+                  {activeTab === 'ai-raporlar' && (
+                    <div>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24}}>
+                        <h2 style={{fontSize: 28, fontWeight: 700, margin: 0, color: '#111827'}}>AI Raporları</h2>
+                        <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
+                          <select style={{
+                            padding: '10px 16px',
+                            borderRadius: 10,
+                            border: '1px solid #d1d5db',
+                            background: 'white',
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: '#374151',
+                            cursor: 'pointer'
+                          }}>
+                            <option>Son 1 Ay</option>
+                            <option>Son 3 Ay</option>
+                            <option>Bu Dönem</option>
+                            <option>Tüm Zamanlar</option>
+                          </select>
+                          <button style={{
+                            padding: '10px 20px',
+                            borderRadius: 10,
+                            border: 'none',
+                            background: '#6a1b9a',
+                            color: 'white',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 14,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8
+                          }}>
+                            <FontAwesomeIcon icon={faDownload} />
+                            Rapor İndir
                           </button>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                )}
 
-                {/* Akıllı Analiz Sekmesi */}
-                {activeTab === 'akilli-analiz' && (
-                  <div className="akilli-analiz">
-                    <div className="section-header">
-                      <h2>Akıllı Analiz</h2>
-                      <button className="yenile-btn">
-                        <FontAwesomeIcon icon={faChartLine} />
-                        Analizi Yenile
-                      </button>
-                    </div>
-
-                    <div className="analiz-grid">
-                      <div className="analiz-kart">
-                        <h3>Öğrenme Profili</h3>
-                        <div className="profil-ozellikler">
-                          <div className="ozellik-item">
-                            <span className="ozellik-label">Öğrenme Stili:</span>
-                            <span className="ozellik-deger">Görsel + Pratik</span>
+                      <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 24}}>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+                            <h3 style={{fontSize: 20, fontWeight: 700, margin: 0, color: '#111827'}}>Performans Tahmini</h3>
+                            <span style={{fontSize: 12, color: '#6b7280'}}>18 Ekim 2024</span>
                           </div>
-                          <div className="ozellik-item">
-                            <span className="ozellik-label">Konsantrasyon:</span>
-                            <span className="ozellik-deger">Yüksek (45-60 dk)</span>
-                          </div>
-                          <div className="ozellik-item">
-                            <span className="ozellik-label">Hız:</span>
-                            <span className="ozellik-deger">Orta-Hızlı</span>
-                          </div>
-                          <div className="ozellik-item">
-                            <span className="ozellik-label">Zorluk Tercihi:</span>
-                            <span className="ozellik-deger">Orta-Zor</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="analiz-kart">
-                        <h3>Güçlü Yönler</h3>
-                        <div className="yonler-listesi">
-                          <div className="yon-item pozitif">
-                            <span className="yon-icon">💪</span>
-                            <span className="yon-text">Matematik problem çözme</span>
-                          </div>
-                          <div className="yon-item pozitif">
-                            <span className="yon-icon">🧠</span>
-                            <span className="yon-text">Mantık yürütme</span>
-                          </div>
-                          <div className="yon-item pozitif">
-                            <span className="yon-icon">⚡</span>
-                            <span className="yon-text">Hızlı kavrama</span>
-                          </div>
-                          <div className="yon-item pozitif">
-                            <span className="yon-icon">🎯</span>
-                            <span className="yon-text">Hedef odaklılık</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="analiz-kart">
-                        <h3>Gelişim Alanları</h3>
-                        <div className="yonler-listesi">
-                          <div className="yon-item negatif">
-                            <span className="yon-icon">📚</span>
-                            <span className="yon-text">Kimya formülleri</span>
-                          </div>
-                          <div className="yon-item negatif">
-                            <span className="yon-icon">⏰</span>
-                            <span className="yon-text">Zaman yönetimi</span>
-                          </div>
-                          <div className="yon-item negatif">
-                            <span className="yon-icon">🔍</span>
-                            <span className="yon-text">Detay odaklılık</span>
-                          </div>
-                          <div className="yon-item negatif">
-                            <span className="yon-icon">📝</span>
-                            <span className="yon-text">Not tutma</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="analiz-kart">
-                        <h3>AI Önerileri</h3>
-                        <div className="oneriler-listesi">
-                          <div className="oneri-item">
-                            <div className="oneri-header">
-                              <span className="oneri-priorite high">Yüksek</span>
-                              <span className="oneri-konu">Türev Konusu</span>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>TYT Tahmini:</span>
+                              <span style={{fontSize: 16, fontWeight: 700, color: '#111827'}}>450-470</span>
                             </div>
-                            <p className="oneri-aciklama">Türev konusunda %75 başarı. Haftalık 20-25 soru ile %90'a çıkarılabilir.</p>
-                          </div>
-                          <div className="oneri-item">
-                            <div className="oneri-header">
-                              <span className="oneri-priorite medium">Orta</span>
-                              <span className="oneri-konu">Zaman Yönetimi</span>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>AYT Tahmini:</span>
+                              <span style={{fontSize: 16, fontWeight: 700, color: '#111827'}}>380-400</span>
                             </div>
-                            <p className="oneri-aciklama">Deneme sınavlarında zaman sıkıntısı yaşıyor. Pomodoro tekniği öneriliyor.</p>
-                          </div>
-                          <div className="oneri-item">
-                            <div className="oneri-header">
-                              <span className="oneri-priorite low">Düşük</span>
-                              <span className="oneri-konu">Kimya Formülleri</span>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>YKS Tahmini:</span>
+                              <span style={{fontSize: 16, fontWeight: 700, color: '#111827'}}>420-440</span>
                             </div>
-                            <p className="oneri-aciklama">Formül ezberleme teknikleri ve görsel hafıza yöntemleri uygulanabilir.</p>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <span style={{fontSize: 14, color: '#6b7280'}}>Güvenilirlik:</span>
+                              <span style={{fontSize: 16, fontWeight: 700, color: '#111827'}}>%87</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
-                {/* AI Raporları Sekmesi */}
-                {activeTab === 'ai-raporlar' && (
-                  <div className="ai-raporlar">
-                    <div className="section-header">
-                      <h2>AI Raporları</h2>
-                      <div className="rapor-filtreler">
-                        <select className="filter-select">
-                          <option>Son 1 Ay</option>
-                          <option>Son 3 Ay</option>
-                          <option>Bu Dönem</option>
-                          <option>Tüm Zamanlar</option>
-                        </select>
-                        <button className="rapor-indir-btn">
-                          <FontAwesomeIcon icon={faDownload} />
-                          Rapor İndir
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="rapor-grid">
-                      <div className="rapor-kart">
-                        <div className="rapor-header">
-                          <h3>Performans Tahmini</h3>
-                          <span className="rapor-tarih">18 Ekim 2024</span>
-                        </div>
-                        <div className="rapor-icerik">
-                          <div className="tahmin-item">
-                            <span className="tahmin-label">TYT Tahmini:</span>
-                            <span className="tahmin-deger">450-470</span>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+                            <h3 style={{fontSize: 20, fontWeight: 700, margin: 0, color: '#111827'}}>Hedef Analizi</h3>
+                            <span style={{fontSize: 12, color: '#6b7280'}}>18 Ekim 2024</span>
                           </div>
-                          <div className="tahmin-item">
-                            <span className="tahmin-label">AYT Tahmini:</span>
-                            <span className="tahmin-deger">380-400</span>
-                          </div>
-                          <div className="tahmin-item">
-                            <span className="tahmin-label">YKS Tahmini:</span>
-                            <span className="tahmin-deger">420-440</span>
-                          </div>
-                          <div className="tahmin-item">
-                            <span className="tahmin-label">Güvenilirlik:</span>
-                            <span className="tahmin-deger">%87</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rapor-kart">
-                        <div className="rapor-header">
-                          <h3>Hedef Analizi</h3>
-                          <span className="rapor-tarih">18 Ekim 2024</span>
-                        </div>
-                        <div className="rapor-icerik">
-                          <div className="hedef-item">
-                            <span className="hedef-uni">İTÜ Bilgisayar Mühendisliği</span>
-                            <div className="hedef-ilerleme">
-                              <div className="progress-bar">
-                                <div className="progress-fill" style={{width: '78%'}}></div>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
+                            {[
+                              { uni: 'İTÜ Bilgisayar Mühendisliği', progress: 78 },
+                              { uni: 'ODTÜ Elektrik Mühendisliği', progress: 85 },
+                              { uni: 'Boğaziçi Matematik', progress: 65 }
+                            ].map((item, idx) => (
+                              <div key={idx}>
+                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+                                  <span style={{fontSize: 14, fontWeight: 600, color: '#111827'}}>{item.uni}</span>
+                                  <span style={{fontSize: 14, fontWeight: 700, color: '#6a1b9a'}}>%{item.progress}</span>
+                                </div>
+                                <div style={{width: '100%', height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden'}}>
+                                  <div style={{width: `${item.progress}%`, height: '100%', background: '#6a1b9a', borderRadius: 4}}></div>
+                                </div>
                               </div>
-                              <span className="hedef-yuzde">%78</span>
-                            </div>
-                          </div>
-                          <div className="hedef-item">
-                            <span className="hedef-uni">ODTÜ Elektrik Mühendisliği</span>
-                            <div className="hedef-ilerleme">
-                              <div className="progress-bar">
-                                <div className="progress-fill" style={{width: '85%'}}></div>
-                              </div>
-                              <span className="hedef-yuzde">%85</span>
-                            </div>
-                          </div>
-                          <div className="hedef-item">
-                            <span className="hedef-uni">Boğaziçi Matematik</span>
-                            <div className="hedef-ilerleme">
-                              <div className="progress-bar">
-                                <div className="progress-fill" style={{width: '65%'}}></div>
-                              </div>
-                              <span className="hedef-yuzde">%65</span>
-                            </div>
+                            ))}
                           </div>
                         </div>
-                      </div>
 
-                      <div className="rapor-kart">
-                        <div className="rapor-header">
-                          <h3>Risk Analizi</h3>
-                          <span className="rapor-tarih">18 Ekim 2024</span>
-                        </div>
-                        <div className="rapor-icerik">
-                          <div className="risk-item">
-                            <span className="risk-label">Kimya Konuları:</span>
-                            <span className="risk-seviye medium">Orta Risk</span>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+                            <h3 style={{fontSize: 20, fontWeight: 700, margin: 0, color: '#111827'}}>Risk Analizi</h3>
+                            <span style={{fontSize: 12, color: '#6b7280'}}>18 Ekim 2024</span>
                           </div>
-                          <div className="risk-item">
-                            <span className="risk-label">Zaman Yönetimi:</span>
-                            <span className="risk-seviye high">Yüksek Risk</span>
-                          </div>
-                          <div className="risk-item">
-                            <span className="risk-label">Motivasyon:</span>
-                            <span className="risk-seviye low">Düşük Risk</span>
-                          </div>
-                          <div className="risk-item">
-                            <span className="risk-label">Genel Durum:</span>
-                            <span className="risk-seviye medium">Orta Risk</span>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                            {[
+                              { label: 'Kimya Konuları:', risk: 'Orta Risk', color: '#f59e0b', bg: '#fef3c7' },
+                              { label: 'Zaman Yönetimi:', risk: 'Yüksek Risk', color: '#dc2626', bg: '#fee2e2' },
+                              { label: 'Motivasyon:', risk: 'Düşük Risk', color: '#16a34a', bg: '#dcfce7' },
+                              { label: 'Genel Durum:', risk: 'Orta Risk', color: '#f59e0b', bg: '#fef3c7' }
+                            ].map((item, idx) => (
+                              <div key={idx} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                <span style={{fontSize: 14, color: '#6b7280'}}>{item.label}</span>
+                                <span style={{fontSize: 12, fontWeight: 700, color: item.color, background: item.bg, padding: '4px 12px', borderRadius: 12}}>{item.risk}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      </div>
 
-                      <div className="rapor-kart">
-                        <div className="rapor-header">
-                          <h3>Önerilen Çalışma Planı</h3>
-                          <span className="rapor-tarih">18 Ekim 2024</span>
-                        </div>
-                        <div className="rapor-icerik">
-                          <div className="plan-item">
-                            <span className="plan-gun">Pazartesi</span>
-                            <span className="plan-konu">Matematik - Türev (2 saat)</span>
+                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+                            <h3 style={{fontSize: 20, fontWeight: 700, margin: 0, color: '#111827'}}>Önerilen Çalışma Planı</h3>
+                            <span style={{fontSize: 12, color: '#6b7280'}}>18 Ekim 2024</span>
                           </div>
-                          <div className="plan-item">
-                            <span className="plan-gun">Salı</span>
-                            <span className="plan-konu">Fizik - Hareket (1.5 saat)</span>
-                          </div>
-                          <div className="plan-item">
-                            <span className="plan-gun">Çarşamba</span>
-                            <span className="plan-konu">Kimya - Atom (1 saat)</span>
-                          </div>
-                          <div className="plan-item">
-                            <span className="plan-gun">Perşembe</span>
-                            <span className="plan-konu">TYT Denemesi (3 saat)</span>
-                          </div>
-                          <div className="plan-item">
-                            <span className="plan-gun">Cuma</span>
-                            <span className="plan-konu">AYT Denemesi (3 saat)</span>
+                          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                            {[
+                              { gun: 'Pazartesi', konu: 'Matematik - Türev (2 saat)' },
+                              { gun: 'Salı', konu: 'Fizik - Hareket (1.5 saat)' },
+                              { gun: 'Çarşamba', konu: 'Kimya - Atom (1 saat)' },
+                              { gun: 'Perşembe', konu: 'TYT Denemesi (3 saat)' },
+                              { gun: 'Cuma', konu: 'AYT Denemesi (3 saat)' }
+                            ].map((item, idx) => (
+                              <div key={idx} style={{display: 'flex', gap: 16, alignItems: 'center'}}>
+                                <span style={{fontSize: 14, fontWeight: 700, color: '#6a1b9a', minWidth: 100}}>{item.gun}</span>
+                                <span style={{fontSize: 14, color: '#111827'}}>{item.konu}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ) : activeMenu === 'kaynak-onerileri' ? (
               <div className="kaynak-onerileri-content">
@@ -8245,8 +8464,7 @@ const MEETING_DAY_OPTIONS = [
                     handleStudentClick(student);
                   }}>
                     <div className="card-header">
-                      <span className="card-title">Öğrenci Profili</span>
-                      <div className="status-indicator">
+                      <div className={`status-indicator ${student.online ? 'online-badge' : 'offline-badge'}`}>
                         <div className={`status-dot ${student.online ? 'online' : 'offline'}`}></div>
                         <span className="status-text">
                           {student.online ? 'Çevrimiçi' : 'Çevrimdışı'}
@@ -8336,25 +8554,37 @@ const MEETING_DAY_OPTIONS = [
                       </div>
                       <div className="student-details">
                         <h3 className="student-name">{student.name}</h3>
-                        <p className="student-class">{student.class}</p>
+                        <p className="student-class">
+                          {student.class}
+                          {student.alan && (
+                            <>
+                              {' • '}
+                              {formatAreaLabel(student.alan)}
+                            </>
+                          )}
+                        </p>
                       </div>
                     </div>
 
                     <div className="performance-metrics">
-                      <div className="metric">
+                      <div className="metric metric-overdue">
                         <span className="metric-label">Zamanı Geçen Etüt :</span>
                         <span className="metric-value">{student.overdue}</span>
                       </div>
-                      <div className="metric">
+                      <div className="metric metric-progress " style={{padding: '12px 14px', borderRadius: 10, border: '1px solid rgb(229, 231, 235)', background: 'rgb(249, 250, 251)'}}> 
                         <span className="metric-label">Günlük Biten Etüt :</span>
                         <div className="progress-container">
                           <div className="progress-bar">
                             <div 
                               className="progress-fill" 
-                              style={{ width: `${student.completed}%` }}
+                              style={{ width: `${student.completed ?? 0}%` }}
                             ></div>
                           </div>
-                          <span className="progress-text">{student.completed}%</span>
+                          <span className="progress-text">
+                            {studentsEtutLoading && (student.completed == null)
+                              ? 'Yükleniyor...'
+                              : `${student.completed ?? 0}%`}
+                          </span>
                         </div>
                       </div>
                     </div>
