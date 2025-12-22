@@ -980,35 +980,34 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
       return program.durum || 'yapilmadi';
     }
 
-    // Eğer veritabanında durum zaten kaydedilmişse, onu kullan
-    // (çünkü bu durum zaten doğru/yanlış değerlerine göre hesaplanmış ve kaydedilmiş)
-    if (program.durum && program.durum !== 'yapilmadi' && program.durum !== '') {
-      return program.durum;
-    }
-
-    // Eğer durum yoksa veya yapılmadıysa, doğru/yanlış değerlerine göre hesapla
-    const dogru = program.dogru !== null && program.dogru !== undefined ? parseInt(program.dogru) || 0 : null;
-    const yanlis = program.yanlis !== null && program.yanlis !== undefined ? parseInt(program.yanlis) || 0 : null;
+    // Doğru, yanlış ve boş değerlerini al
+    const dogru = program.dogru !== null && program.dogru !== undefined ? parseInt(program.dogru) || 0 : 0;
+    const yanlis = program.yanlis !== null && program.yanlis !== undefined ? parseInt(program.yanlis) || 0 : 0;
+    const bos = program.bos !== null && program.bos !== undefined ? parseInt(program.bos) || 0 : 0;
     const soruSayisi = parseInt(program.soru_sayisi) || 0;
 
-    // Eğer hiç değer girilmemişse (null veya undefined)
-    if (dogru === null && yanlis === null) {
-      return program.durum || 'yapilmadi';
+    // Toplam hesapla
+    const toplam = dogru + yanlis + bos;
+
+    // Validasyon: Toplam soru sayısını geçemez
+    if (toplam > soruSayisi) {
+      // Eğer toplam soru sayısını geçiyorsa, durumu koru veya eksik yapıldı olarak işaretle
+      return program.durum || 'eksik_yapildi';
     }
 
-    // Girilen değerleri kontrol et
-    const dogruVal = dogru !== null ? dogru : 0;
-    const yanlisVal = yanlis !== null ? yanlis : 0;
-    const toplam = dogruVal + yanlisVal;
-
-    // Eğer soru sayısına eşitse yapıldı
+    // 1. Doğru + Yanlış + Boş = Soru Sayısı → Yapıldı
     if (toplam === soruSayisi && soruSayisi > 0) {
       return 'yapildi';
     }
 
-    // Eğer değer girilmiş ama soru sayısına eşit değilse eksik yapıldı
+    // 2. Doğru + Yanlış + Boş < Soru Sayısı (ama > 0) → Eksik Yapıldı
     if (toplam > 0 && toplam < soruSayisi) {
       return 'eksik_yapildi';
+    }
+
+    // 3. Hiç girilmemişse (toplam = 0) → Yapılmadı
+    if (toplam === 0) {
+      return 'yapilmadi';
     }
 
     // Varsayılan durum
@@ -2669,7 +2668,13 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
                                           const numValue = parseInt(value) || 0;
-                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                          const yanlisVal = parseInt(currentInputs.yanlis) || 0;
+                                          const bosVal = parseInt(currentInputs.bos) || 0;
+                                          const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+                                          const toplam = numValue + yanlisVal + bosVal;
+                                          
+                                          // Validasyon: Toplam soru sayısını geçemez
+                                          if (value === '' || (numValue >= 0 && numValue <= soruSayisi && toplam <= soruSayisi)) {
                                             setStatusInputs(prev => ({
                                               ...prev,
                                               [prog.id]: { ...currentInputs, dogru: value }
@@ -2706,7 +2711,13 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
                                           const numValue = parseInt(value) || 0;
-                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                          const dogruVal = parseInt(currentInputs.dogru) || 0;
+                                          const bosVal = parseInt(currentInputs.bos) || 0;
+                                          const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+                                          const toplam = dogruVal + numValue + bosVal;
+                                          
+                                          // Validasyon: Toplam soru sayısını geçemez
+                                          if (value === '' || (numValue >= 0 && numValue <= soruSayisi && toplam <= soruSayisi)) {
                                             setStatusInputs(prev => ({
                                               ...prev,
                                               [prog.id]: { ...currentInputs, yanlis: value }
@@ -2743,7 +2754,13 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
                                           const numValue = parseInt(value) || 0;
-                                          if (value === '' || (numValue >= 0 && numValue <= prog.soru_sayisi)) {
+                                          const dogruVal = parseInt(currentInputs.dogru) || 0;
+                                          const yanlisVal = parseInt(currentInputs.yanlis) || 0;
+                                          const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+                                          const toplam = dogruVal + yanlisVal + numValue;
+                                          
+                                          // Validasyon: Toplam soru sayısını geçemez
+                                          if (value === '' || (numValue >= 0 && numValue <= soruSayisi && toplam <= soruSayisi)) {
                                             setStatusInputs(prev => ({
                                               ...prev,
                                               [prog.id]: { ...currentInputs, bos: value }
@@ -2780,16 +2797,28 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                         const bos = currentInputs.bos === '' ? 0 : (parseInt(currentInputs.bos) || 0);
                                         const soruSayisi = parseInt(prog.soru_sayisi) || 0;
                                         
+                                        // Validasyon: Toplam soru sayısını geçemez
+                                        const toplam = dogru + yanlis + bos;
+                                        if (toplam > soruSayisi) {
+                                          alert(`Toplam (Doğru + Yanlış + Boş) soru sayısını (${soruSayisi}) geçemez!`);
+                                          return;
+                                        }
+                                        
                                         console.log('Kaydet butonu - Dogru:', dogru, 'Yanlis:', yanlis, 'Bos:', bos);
                                         console.log('Current inputs:', currentInputs);
                                         
                                         let newStatus;
-                                        if (dogru === 0 && yanlis === 0) {
-                                          newStatus = 'yapilmadi';
-                                        } else if (dogru + yanlis === soruSayisi) {
+                                        // 1. Doğru + Yanlış + Boş = Soru Sayısı → Yapıldı
+                                        if (toplam === soruSayisi && soruSayisi > 0) {
                                           newStatus = 'yapildi';
-                                        } else {
+                                        }
+                                        // 2. Doğru + Yanlış + Boş < Soru Sayısı (ama > 0) → Eksik Yapıldı
+                                        else if (toplam > 0 && toplam < soruSayisi) {
                                           newStatus = 'eksik_yapildi';
+                                        }
+                                        // 3. Hiç girilmemişse (toplam = 0) → Yapılmadı
+                                        else {
+                                          newStatus = 'yapilmadi';
                                         }
                                         
                                         handleStatusUpdate(prog, newStatus, dogru, yanlis, bos);

@@ -233,6 +233,19 @@ const MEETING_DAY_OPTIONS = [
   const [addSuccess, setAddSuccess] = useState('');
   const [stuUploading, setStuUploading] = useState(false);
 
+  // Veli formu için state
+  const [veliForm, setVeliForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    password: '',
+    passwordConfirm: ''
+  });
+  const [veliSaving, setVeliSaving] = useState(false);
+  const [veliError, setVeliError] = useState('');
+  const [veliSuccess, setVeliSuccess] = useState('');
+
   // Öğrenci düzenleme/silme için state
   const [openMenuId, setOpenMenuId] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -275,6 +288,7 @@ const MEETING_DAY_OPTIONS = [
 
       const startDateStr = weekStart.toISOString().split('T')[0];
       const endDateStr = weekEnd.toISOString().split('T')[0];
+      const todayStr = today.toISOString().split('T')[0];
 
       const updated = await Promise.all(
         studentList.map(async (stu) => {
@@ -287,6 +301,7 @@ const MEETING_DAY_OPTIONS = [
               let yapilan = 0;
               let yapilmayan = 0;
               let toplam = 0;
+              let bugunYapilmayan = 0; // Sadece bugün için zamanı geçen etüt
 
               data.programs.forEach((prog) => {
                 toplam++;
@@ -294,6 +309,10 @@ const MEETING_DAY_OPTIONS = [
                   yapilan++;
                 } else {
                   yapilmayan++;
+                  // Sadece bugün için zamanı geçen etütleri say
+                  if (prog.tarih === todayStr) {
+                    bugunYapilmayan++;
+                  }
                 }
               });
 
@@ -301,7 +320,7 @@ const MEETING_DAY_OPTIONS = [
 
               return {
                 ...stu,
-                overdue: yapilmayan,
+                overdue: bugunYapilmayan, // Sadece bugün için zamanı geçen etüt
                 completed: completedPct
               };
             }
@@ -2129,6 +2148,12 @@ const MEETING_DAY_OPTIONS = [
                     >
                       Haftalık Takvim
                     </button>
+                    <button 
+                      className={`tab ${activeTab === 'veli-bilgileri' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('veli-bilgileri')}
+                    >
+                      Veli Bilgileri
+                    </button>
                   </div>
                 </div>
 
@@ -2273,6 +2298,179 @@ const MEETING_DAY_OPTIONS = [
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Veli Bilgileri Sekmesi */}
+                {activeTab === 'veli-bilgileri' && (
+                  <div className="veli-bilgileri" style={{padding: '24px', background: 'white', borderRadius: '12px'}}>
+                    <div className="section-header" style={{marginBottom: '24px'}}>
+                      <h2 style={{margin: 0, fontSize: '24px', fontWeight: 700, color: '#111827'}}>Veli Bilgileri</h2>
+                    </div>
+                    
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!selectedStudent?.id) {
+                        setVeliError('Öğrenci seçilmedi');
+                        return;
+                      }
+                      
+                      if (veliForm.password !== veliForm.passwordConfirm) {
+                        setVeliError('Şifreler eşleşmiyor');
+                        return;
+                      }
+                      
+                      setVeliSaving(true);
+                      setVeliError('');
+                      setVeliSuccess('');
+                      
+                      try {
+                        const user = JSON.parse(localStorage.getItem('user'));
+                        const response = await fetch(`${API_BASE}/php-backend/api/create_parent.php`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify({
+                            firstName: veliForm.firstName,
+                            lastName: veliForm.lastName,
+                            email: veliForm.email,
+                            phone: veliForm.phone || null,
+                            password: veliForm.password,
+                            studentId: selectedStudent.id,
+                            teacherId: user.id
+                          })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                          setVeliSuccess('Veli başarıyla oluşturuldu');
+                          setVeliForm({
+                            firstName: '',
+                            lastName: '',
+                            email: '',
+                            phone: '',
+                            password: '',
+                            passwordConfirm: ''
+                          });
+                        } else {
+                          setVeliError(data.message || 'Veli oluşturulamadı');
+                        }
+                      } catch (error) {
+                        console.error('Veli oluşturma hatası:', error);
+                        setVeliError('Veli oluşturulamadı: ' + error.message);
+                      } finally {
+                        setVeliSaving(false);
+                      }
+                    }}>
+                      <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px'}}>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>Ad</label>
+                          <input
+                            type="text"
+                            value={veliForm.firstName}
+                            onChange={(e) => setVeliForm({...veliForm, firstName: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>Soyad</label>
+                          <input
+                            type="text"
+                            value={veliForm.lastName}
+                            onChange={(e) => setVeliForm({...veliForm, lastName: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px'}}>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>E-posta</label>
+                          <input
+                            type="email"
+                            value={veliForm.email}
+                            onChange={(e) => setVeliForm({...veliForm, email: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>Telefon</label>
+                          <input
+                            type="tel"
+                            value={veliForm.phone}
+                            onChange={(e) => setVeliForm({...veliForm, phone: e.target.value})}
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px'}}>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>Şifre</label>
+                          <input
+                            type="password"
+                            value={veliForm.password}
+                            onChange={(e) => setVeliForm({...veliForm, password: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                        <div>
+                          <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 600, color: '#374151'}}>Şifre Tekrar</label>
+                          <input
+                            type="password"
+                            value={veliForm.passwordConfirm}
+                            onChange={(e) => setVeliForm({...veliForm, passwordConfirm: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px'}}
+                          />
+                        </div>
+                      </div>
+                      
+                      {veliError && (
+                        <div style={{padding: '12px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', marginBottom: '16px'}}>
+                          {veliError}
+                        </div>
+                      )}
+                      
+                      {veliSuccess && (
+                        <div style={{padding: '12px', background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '8px', color: '#065f46', marginBottom: '16px'}}>
+                          {veliSuccess}
+                        </div>
+                      )}
+                      
+                      <div style={{display: 'flex', justifyContent: 'flex-end', gap: '12px'}}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVeliForm({
+                              firstName: '',
+                              lastName: '',
+                              email: '',
+                              phone: '',
+                              password: '',
+                              passwordConfirm: ''
+                            });
+                            setVeliError('');
+                            setVeliSuccess('');
+                          }}
+                          style={{padding: '10px 20px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 600, color: '#374151'}}
+                        >
+                          Temizle
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={veliSaving}
+                          style={{padding: '10px 20px', background: veliSaving ? '#9ca3af' : '#6a1b9a', border: 'none', borderRadius: '8px', cursor: veliSaving ? 'not-allowed' : 'pointer', fontSize: '14px', fontWeight: 600, color: 'white'}}
+                        >
+                          {veliSaving ? 'Kaydediliyor...' : 'Veli Oluştur'}
+                        </button>
+                      </div>
+                    </form>
                   </div>
                 )}
 
@@ -3563,126 +3761,205 @@ const MEETING_DAY_OPTIONS = [
                               KONU BAZLI SORU DAĞILIMI
                             </h3>
                             
-                            {/* Dikey Bar Chart Container - Görseldeki gibi */}
-                            <div style={{display: 'flex', gap: 32, minHeight: '450px', padding: '40px 20px', position: 'relative'}}>
-                              {/* Chart Bars */}
-                              <div style={{flex: 1, display: 'flex', alignItems: 'flex-end', gap: 24, justifyContent: 'center'}}>
-                                {Object.entries(topicStats)
-                                  .sort((a, b) => b[1].total - a[1].total) // Toplam soru sayısına göre sırala
-                                  .map(([topic, stats]) => {
-                                    const maxValue = Math.max(...Object.values(topicStats).map(s => s.total));
-                                    const barHeight = (stats.total / maxValue) * 100; // Bar yüksekliği yüzdesi
-                                    const maxBarHeight = 300; // Maksimum bar yüksekliği (px)
-                                    const actualBarHeight = (barHeight / 100) * maxBarHeight;
-                                    
-                                    // Yapıldı ve yapılmadı yükseklikleri
-                                    const yapildiHeight = stats.total > 0 ? (stats.yapildi / stats.total) * actualBarHeight : 0;
-                                    const yapilmadiHeight = stats.total > 0 ? ((stats.yapilmadi + stats.eksik_yapildi) / stats.total) * actualBarHeight : 0;
-                                    
-                                    return (
-                                      <div key={topic} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, maxWidth: '120px'}}>
-                                        {/* Toplam soru sayısı - Bar'ın üstünde */}
-                                        <div style={{
-                                          fontSize: '18px',
-                                          fontWeight: 700,
-                                          color: '#1f2937',
-                                          marginBottom: 12,
-                                          minHeight: '24px',
-                                          display: 'flex',
-                                          alignItems: 'center'
-                                        }}>
-                                          {stats.total}
+                            {/* Dikey Bar Chart Container - Öğrenci panelindeki gibi */}
+                            <div style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb'}}>
+                              {(() => {
+                                const rawMaxValue = Math.max(...Object.values(topicStats).map(s => s.total), 0);
+                                // maxValue'yu yukarı yuvarla (en yakın 5'in katına veya %10 ekle)
+                                const maxValue = rawMaxValue > 0 ? Math.ceil(rawMaxValue * 1.1 / 5) * 5 : 5;
+                                const chartHeight = 300;
+                                
+                                return (
+                                  <div style={{position: 'relative', height: chartHeight}}>
+                                    {/* Y ekseni */}
+                                    <div style={{
+                                      position: 'absolute',
+                                      left: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 30,
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      justifyContent: 'space-between',
+                                      paddingRight: 8
+                                    }}>
+                                      {[maxValue, maxValue * 0.75, maxValue * 0.5, maxValue * 0.25, 0].map((val, idx) => (
+                                        <div key={idx} style={{fontSize: 11, color: '#6b7280', textAlign: 'right'}}>
+                                          {Math.round(val)}
                                         </div>
-                                        
-                                        {/* Dikey Stacked Bar Chart */}
-                                        <div 
+                                      ))}
+                                    </div>
+                                    
+                                    {/* Grafik alanı */}
+                                    <div style={{
+                                      marginLeft: 40,
+                                      position: 'relative',
+                                      height: chartHeight,
+                                      borderLeft: '1px solid #e5e7eb',
+                                      borderBottom: '1px solid #e5e7eb'
+                                    }}>
+                                      {/* Grid çizgileri */}
+                                      {[1, 2, 3, 4].map(val => (
+                                        <div
+                                          key={val}
                                           style={{
-                                            width: '100%',
-                                            height: `${actualBarHeight}px`,
-                                            minHeight: '80px',
-                                            position: 'relative',
-                                            display: 'flex',
-                                            flexDirection: 'column-reverse', // Alt'tan üste doğru
-                                            borderRadius: '8px 8px 0 0',
-                                            overflow: 'hidden',
-                                            border: '1px solid #d1d5db',
-                                            borderBottom: 'none',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            position: 'absolute',
+                                            left: 0,
+                                            right: 0,
+                                            bottom: `${(val / 4) * 100}%`,
+                                            borderTop: '1px dashed #e5e7eb'
                                           }}
-                                          onMouseEnter={(e) => {
-                                            e.target.style.transform = 'scale(1.03)';
-                                            e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                                          }}
-                                          onMouseLeave={(e) => {
-                                            e.target.style.transform = 'scale(1)';
-                                            e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                                          }}
-                                          title={`${topic}: Toplam ${stats.total}, Yapıldı ${stats.yapildi}, Yapılmadı ${stats.yapilmadi + stats.eksik_yapildi}`}
-                                        >
-                                          {/* Kırmızı segment (Yapılmadı + Eksik) - Alt kısım */}
-                                          {yapilmadiHeight > 0 && (
-                                            <div
-                                              style={{
-                                                height: `${yapilmadiHeight}px`,
-                                                minHeight: yapilmadiHeight > 3 ? '25px' : '0',
-                                                background: '#ef4444',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: 'white',
-                                                fontSize: yapilmadiHeight > 25 ? '14px' : '12px',
-                                                fontWeight: 700,
-                                                textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-                                                borderTop: yapildiHeight > 0 ? '2px solid rgba(255,255,255,0.4)' : 'none'
-                                              }}
-                                            >
-                                              {yapilmadiHeight > 25 && (stats.yapilmadi + stats.eksik_yapildi)}
-                                            </div>
-                                          )}
-                                          
-                                          {/* Yeşil segment (Yapıldı) - Üst kısım */}
-                                          {yapildiHeight > 0 && (
-                                            <div
-                                              style={{
-                                                height: `${yapildiHeight}px`,
-                                                minHeight: yapildiHeight > 3 ? '25px' : '0',
-                                                background: '#10b981',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: 'white',
-                                                fontSize: yapildiHeight > 25 ? '14px' : '12px',
-                                                fontWeight: 700,
-                                                textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-                                                borderRadius: '8px 8px 0 0'
-                                              }}
-                                            >
-                                              {yapildiHeight > 25 && stats.yapildi}
-                                            </div>
-                                          )}
-                                        </div>
-                                        
-                                        {/* Konu adı - Bar'ın altında */}
-                                        <div style={{
-                                          fontSize: '13px',
-                                          fontWeight: 600,
-                                          color: '#374151',
-                                          textAlign: 'center',
-                                          padding: '12px 4px 0',
-                                          lineHeight: '1.4',
-                                          minHeight: '50px',
-                                          display: 'flex',
-                                          alignItems: 'flex-start',
-                                          justifyContent: 'center'
-                                        }}>
-                                          {topic}
-                                        </div>
+                                        />
+                                      ))}
+                                      
+                                      {/* Chart Bars */}
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-end',
+                                        height: '100%',
+                                        padding: '0 20px',
+                                        gap: 24,
+                                        justifyContent: 'center',
+                                        position: 'absolute',
+                                        bottom: 0,
+                                        left: 0,
+                                        right: 0
+                                      }}>
+                                        {Object.entries(topicStats)
+                                          .sort((a, b) => b[1].total - a[1].total) // Toplam soru sayısına göre sırala
+                                          .map(([topic, stats]) => {
+                                            const barHeight = (stats.total / maxValue) * 100; // Bar yüksekliği yüzdesi
+                                            const actualBarHeight = (barHeight / 100) * chartHeight;
+                                            
+                                            // Yapıldı ve yapılmadı yükseklikleri
+                                            const yapildiHeight = stats.total > 0 ? (stats.yapildi / stats.total) * actualBarHeight : 0;
+                                            const yapilmadiHeight = stats.total > 0 ? ((stats.yapilmadi + stats.eksik_yapildi) / stats.total) * actualBarHeight : 0;
+                                            
+                                            return (
+                                              <div key={topic} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, maxWidth: '120px', justifyContent: 'flex-end', height: '100%'}}>
+                                                {/* Toplam soru sayısı - Bar'ın üstünde */}
+                                                <div style={{
+                                                  fontSize: '18px',
+                                                  fontWeight: 700,
+                                                  color: '#1f2937',
+                                                  marginBottom: 12,
+                                                  minHeight: '24px',
+                                                  display: 'flex',
+                                                  alignItems: 'center'
+                                                }}>
+                                                  {stats.total}
+                                                </div>
+                                                
+                                                {/* Dikey Stacked Bar Chart */}
+                                                <div 
+                                                  style={{
+                                                    width: '100%',
+                                                    height: `${actualBarHeight}px`,
+                                                    minHeight: stats.total > 0 ? 5 : 0,
+                                                    position: 'relative',
+                                                    display: 'flex',
+                                                    flexDirection: 'column-reverse', // Alt'tan üste doğru
+                                                    borderRadius: '4px 4px 0 0',
+                                                    overflow: 'hidden',
+                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s',
+                                                    alignSelf: 'flex-end'
+                                                  }}
+                                                  onMouseEnter={(e) => {
+                                                    e.target.style.transform = 'scale(1.03)';
+                                                    e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                                                  }}
+                                                  onMouseLeave={(e) => {
+                                                    e.target.style.transform = 'scale(1)';
+                                                    e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                                                  }}
+                                                  title={`${topic}: Toplam ${stats.total}, Yapıldı ${stats.yapildi}, Yapılmadı ${stats.yapilmadi + stats.eksik_yapildi}`}
+                                                >
+                                                  {/* Kırmızı segment (Yapılmadı + Eksik) - Alt kısım */}
+                                                  {yapilmadiHeight > 0 && (
+                                                    <div
+                                                      style={{
+                                                        height: `${yapilmadiHeight}px`,
+                                                        minHeight: yapilmadiHeight > 3 ? '25px' : '0',
+                                                        background: '#ef4444',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        color: 'white',
+                                                        fontSize: yapilmadiHeight > 25 ? '14px' : '12px',
+                                                        fontWeight: 700,
+                                                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                                                        borderTop: yapildiHeight > 0 ? '2px solid rgba(255,255,255,0.4)' : 'none'
+                                                      }}
+                                                    >
+                                                      {yapilmadiHeight > 25 && (stats.yapilmadi + stats.eksik_yapildi)}
+                                                    </div>
+                                                  )}
+                                                  
+                                                  {/* Yeşil segment (Yapıldı) - Üst kısım */}
+                                                  {yapildiHeight > 0 && (
+                                                    <div
+                                                      style={{
+                                                        height: `${yapildiHeight}px`,
+                                                        minHeight: yapildiHeight > 3 ? '25px' : '0',
+                                                        background: '#10b981',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        color: 'white',
+                                                        fontSize: yapildiHeight > 25 ? '14px' : '12px',
+                                                        fontWeight: 700,
+                                                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                                                        borderRadius: '4px 4px 0 0'
+                                                      }}
+                                                    >
+                                                      {yapildiHeight > 25 && stats.yapildi}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
                                       </div>
-                                    );
-                                  })}
-                              </div>
+                                      
+                                      {/* Konu adları - Grafik alanının dışında */}
+                                      <div style={{
+                                        marginLeft: 40,
+                                        marginTop: 12,
+                                        display: 'flex',
+                                        padding: '0 20px',
+                                        gap: 24,
+                                        justifyContent: 'center'
+                                      }}>
+                                        {Object.entries(topicStats)
+                                          .sort((a, b) => b[1].total - a[1].total)
+                                          .map(([topic, stats]) => (
+                                            <div
+                                              key={topic}
+                                              style={{
+                                                flex: 1,
+                                                maxWidth: '120px',
+                                                fontSize: '13px',
+                                                fontWeight: 600,
+                                                color: '#374151',
+                                                textAlign: 'center',
+                                                padding: '12px 4px 0',
+                                                lineHeight: '1.4',
+                                                minHeight: '50px',
+                                                display: 'flex',
+                                                alignItems: 'flex-start',
+                                                justifyContent: 'center'
+                                              }}
+                                            >
+                                              {topic}
+                                            </div>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         ) : selectedSubject ? (
@@ -8436,7 +8713,17 @@ const MEETING_DAY_OPTIONS = [
             </div>
           ) : (
             <div className="students-content">
-              <h1 className="page-title">Öğrenciler</h1>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24}}>
+                <h1 className="page-title" style={{margin: 0}}>Öğrenciler</h1>
+                <button 
+                  className="edit-btn" 
+                  onClick={() => setShowAddStudentModal(true)}
+                  style={{ padding: '10px 20px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                  <FontAwesomeIcon icon={faPlus} />
+                  Öğrenci Ekle
+                </button>
+              </div>
               
               {studentsLoading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>Yükleniyor...</div>
@@ -8572,7 +8859,7 @@ const MEETING_DAY_OPTIONS = [
                         <span className="metric-value">{student.overdue}</span>
                       </div>
                       <div className="metric metric-progress " style={{padding: '12px 14px', borderRadius: 10, border: '1px solid rgb(229, 231, 235)', background: 'rgb(249, 250, 251)'}}> 
-                        <span className="metric-label">Günlük Biten Etüt :</span>
+                        <span className="metric-label">Haftalık Biten Etüt :</span>
                         <div className="progress-container">
                           <div className="progress-bar">
                             <div 
@@ -8589,17 +8876,6 @@ const MEETING_DAY_OPTIONS = [
                       </div>
                     </div>
 
-                    <div className="card-actions">
-                      <button className="action-btn phone-btn">
-                        <FontAwesomeIcon icon={faPhone} />
-                      </button>
-                      <button className="action-btn message-btn">
-                        <FontAwesomeIcon icon={faMessageIcon} />
-                      </button>
-                      <button className="action-btn notification-btn">
-                        Bildirim Gönder
-                      </button>
-                    </div>
                   </div>
                 ))}
               </div>

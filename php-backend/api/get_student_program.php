@@ -105,6 +105,23 @@ try {
                 return (int) $day;
             }, $days);
 
+            // Rutinin oluşturulma tarihini al ve o haftanın başlangıcını hesapla
+            // Rutin oluşturulduğu haftanın başlangıcından itibaren programlar oluşturulmalı
+            $routineCreationDate = null;
+            if (!empty($routine['olusturma_tarihi'])) {
+                $routineCreationDate = new DateTime($routine['olusturma_tarihi']);
+            } else {
+                // Eski rutinler için (olusturma_tarihi NULL ise) bugünün tarihini kullan
+                // Böylece geçmişe eklenmez
+                $routineCreationDate = new DateTime('today');
+            }
+            
+            // Rutin oluşturulduğu haftanın başlangıcını hesapla (Pazartesi)
+            $dayOfWeek = (int) $routineCreationDate->format('N'); // 1=Monday, 7=Sunday
+            $daysToSubtract = $dayOfWeek - 1; // Pazartesi'ye kadar kaç gün var
+            $routineCreationDate->modify("-{$daysToSubtract} days");
+            $routineCreationDate->setTime(0, 0, 0); // Günün başlangıcı
+
             // Ensure we iterate through all days in the week range
             // Use DateTime for more reliable date calculations
             $currentDate = new DateTime($startDate);
@@ -112,6 +129,15 @@ try {
             $endDateObj->modify('+1 day'); // Include end date
             
             while ($currentDate < $endDateObj) {
+                // Rutin oluşturulma tarihinden önceki tarihler için program oluşturma
+                // Sadece rutin oluşturulduğu hafta ve sonrası için programlar oluştur
+                $currentDateOnly = clone $currentDate;
+                $currentDateOnly->setTime(0, 0, 0);
+                if ($currentDateOnly < $routineCreationDate) {
+                    $currentDate->modify('+1 day');
+                    continue;
+                }
+                
                 // Get day of week: 1 (Monday) to 7 (Sunday) - ISO-8601
                 $dayNumber = (int) $currentDate->format('N');
                 
