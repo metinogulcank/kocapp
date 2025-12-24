@@ -1,0 +1,774 @@
+openapi: 3.0.3
+info:
+  title: KoçApp API
+  version: 1.0.0
+  description: KoçApp PHP backend için OpenAPI tanımı
+servers:
+  - url: https://vedatdaglarmuhendislik.com.tr/php-backend/api
+    description: Production
+paths:
+  /login.php:
+    post:
+      tags: [Auth]
+      summary: Kullanıcı girişi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+              required: [email, password]
+      responses:
+        '200':
+          description: Başarılı giriş
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  email: { type: string, format: email }
+                  role: { type: string, enum: [ogrenci, ogretmen, veli, admin] }
+                  firstName: { type: string }
+                  lastName: { type: string }
+                  studentId: { type: string, nullable: true }
+                  token: { type: string }
+                  message: { type: string }
+        '400':
+          description: Eksik parametreler
+        '401':
+          description: Geçersiz kimlik bilgileri
+  /logout.php:
+    post:
+      tags: [Auth]
+      summary: Çıkış yap ve öğrenci çevrimiçi durumunu kapat
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                studentId:
+                  type: string
+      responses:
+        '200':
+          description: Başarılı çıkış
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  ok: { type: boolean }
+  /get_student_info.php:
+    get:
+      tags: [Student]
+      summary: Öğrenci bilgilerini getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  student:
+                    $ref: '#/components/schemas/Student'
+        '404':
+          description: Öğrenci bulunamadı
+  /get_teacher_students.php:
+    get:
+      tags: [Teacher]
+      summary: Öğretmenin öğrencilerini getir
+      parameters:
+        - in: query
+          name: teacherId
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  students:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Student'
+        '400':
+          description: Teacher ID gerekli
+  /create_student.php:
+    post:
+      tags: [Student]
+      summary: Öğrenci oluştur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStudentPayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '400':
+          description: Zorunlu alanlar eksik
+        '409':
+          description: E-posta zaten kayıtlı
+  /update_student.php:
+    post:
+      tags: [Student]
+      summary: Öğrenci bilgilerini güncelle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentPayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '400':
+          description: Hatalı istek
+        '404':
+          description: Öğrenci bulunamadı
+        '409':
+          description: E-posta başka öğrenci tarafından kullanılıyor
+  /delete_student.php:
+    post:
+      tags: [Student]
+      summary: Öğrenci sil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string }
+                teacherId: { type: string }
+              required: [id, teacherId]
+      responses:
+        '200':
+          description: Başarılı
+        '400':
+          description: Hatalı istek
+  /get_student_program.php:
+    get:
+      tags: [Program]
+      summary: Öğrenci programlarını getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+          required: true
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  programs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Program'
+        '400':
+          description: Eksik parametreler
+  /save_student_program.php:
+    post:
+      tags: [Program]
+      summary: Öğrenci programı oluştur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Başarılı
+  /update_student_program.php:
+    post:
+      tags: [Program]
+      summary: Öğrenci programını güncelle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Başarılı
+  /delete_student_program.php:
+    post:
+      tags: [Program]
+      summary: Öğrenci programını sil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Başarılı
+  /update_student_program_status.php:
+    post:
+      tags: [Program]
+      summary: Program durumunu güncelle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                programId: { type: string }
+                durum: { type: string }
+      responses:
+        '200':
+          description: Başarılı
+  /get_genel_denemeler.php:
+    get:
+      tags: [Deneme]
+      summary: Genel denemeleri getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  denemeler:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GenelDeneme'
+        '400':
+          description: studentId gerekli
+  /save_genel_deneme.php:
+    post:
+      tags: [Deneme]
+      summary: Genel deneme kaydet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveGenelDenemePayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string }
+                  message: { type: string }
+        '400':
+          description: Eksik parametreler
+  /get_brans_denemeleri.php:
+    get:
+      tags: [Deneme]
+      summary: Branş denemelerini getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+        - in: query
+          name: ders
+          schema: { type: string }
+          required: false
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  denemeler:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BransDeneme'
+        '400':
+          description: studentId gerekli
+  /save_brans_deneme.php:
+    post:
+      tags: [Deneme]
+      summary: Branş denemesi kaydet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveBransDenemePayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string }
+                  net: { type: number }
+                  message: { type: string }
+        '400':
+          description: Eksik parametreler
+  /get_konu_ilerlemesi.php:
+    get:
+      tags: [KonuIlerlemesi]
+      summary: Konu ilerlemesini getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+        - in: query
+          name: ders
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  konular:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KonuIlerlemesi'
+        '400':
+          description: Eksik parametreler
+  /save_konu_ilerlemesi.php:
+    post:
+      tags: [KonuIlerlemesi]
+      summary: Konu ilerlemesini kaydet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveKonuIlerlemesiPayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+        '400':
+          description: Eksik parametreler
+  /get_parent_info.php:
+    get:
+      tags: [Parent]
+      summary: Veli bilgilerini getir
+      parameters:
+        - in: query
+          name: studentId
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  parent:
+                    $ref: '#/components/schemas/Parent'
+  /create_parent.php:
+    post:
+      tags: [Parent]
+      summary: Veli oluştur ve öğrenciye bağla
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateParentPayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+                  id: { type: string }
+                  studentId: { type: string }
+        '400':
+          description: Eksik parametreler veya hatalı istek
+        '409':
+          description: E-posta zaten kayıtlı
+  /update_parent.php:
+    post:
+      tags: [Parent]
+      summary: Veli bilgilerini güncelle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateParentPayload'
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+        '400':
+          description: Eksik parametreler
+        '409':
+          description: E-posta başka kullanıcı tarafından kullanılıyor
+  /get_student_by_parent.php:
+    get:
+      tags: [Parent]
+      summary: Velinin bağlı olduğu öğrenciyi getir
+      parameters:
+        - in: query
+          name: parentId
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  student:
+                    $ref: '#/components/schemas/Student'
+  /upload_teacher_photo.php:
+    post:
+      tags: [Files]
+      summary: Fotoğraf yükle
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                _id:
+                  type: string
+                type:
+                  type: string
+                  enum: [teacher, student]
+      responses:
+        '200':
+          description: Başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  url: { type: string }
+components:
+  schemas:
+    Student:
+      type: object
+      properties:
+        id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        className: { type: string }
+        alan: { type: string }
+        profilePhoto: { type: string, nullable: true }
+        meetingDay: { type: integer, nullable: true }
+        meetingDate: { type: string, format: date, nullable: true }
+        sinavTarihi: { type: string, format: date, nullable: true }
+        onlineStatus: { type: integer, nullable: true }
+        sonGirisTarihi: { type: string, format: date-time, nullable: true }
+    Program:
+      type: object
+      properties:
+        id: { type: string }
+        ogrenci_id: { type: string }
+        ogretmen_id: { type: string, nullable: true }
+        routine_id: { type: string, nullable: true }
+        tarih: { type: string, format: date }
+        baslangic_saati: { type: string, nullable: true }
+        bitis_saati: { type: string, nullable: true }
+        program_tipi: { type: string }
+        ders: { type: string }
+        konu: { type: string, nullable: true }
+        kaynak: { type: string, nullable: true }
+        aciklama: { type: string, nullable: true }
+        soru_sayisi: { type: integer, nullable: true }
+        durum: { type: string }
+        dogru: { type: integer, nullable: true }
+        yanlis: { type: integer, nullable: true }
+        bos: { type: integer, nullable: true }
+        youtube_linki: { type: string, nullable: true }
+        is_routine: { type: boolean, nullable: true }
+    Parent:
+      type: object
+      nullable: true
+      properties:
+        _id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+    BransDeneme:
+      type: object
+      properties:
+        id: { type: string }
+        alan: { type: string, nullable: true }
+        ders: { type: string }
+        denemeAdi: { type: string }
+        denemeTarihi: { type: string, format: date }
+        soruSayisi: { type: integer }
+        dogru: { type: integer }
+        yanlis: { type: integer }
+        bos: { type: integer }
+        net: { type: number }
+        konular:
+          type: array
+          items:
+            $ref: '#/components/schemas/BransDenemeKonuSonucu'
+    BransDenemeKonuSonucu:
+      type: object
+      properties:
+        id: { type: string }
+        konu: { type: string }
+        sira: { type: integer }
+        dogru: { type: integer }
+        yanlis: { type: integer }
+        bos: { type: integer }
+        basariYuzde: { type: number }
+    GenelDeneme:
+      type: object
+      properties:
+        id: { type: string }
+        denemeAdi: { type: string }
+        denemeTarihi: { type: string, format: date }
+        notlar: { type: string, nullable: true }
+        sinavTipi: { type: string }
+        dersSonuclari:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/GenelDenemeDersSonucu'
+        degerlendirme:
+          $ref: '#/components/schemas/GenelDenemeDegerlendirme'
+    GenelDenemeDersSonucu:
+      type: object
+      properties:
+        soruSayisi: { type: integer }
+        dogru: { type: integer }
+        yanlis: { type: integer }
+        bos: { type: integer }
+        net: { type: number }
+    GenelDenemeDegerlendirme:
+      type: object
+      nullable: true
+      properties:
+        zamanYeterli: { type: integer }
+        odaklanma: { type: integer }
+        kaygiDuzeyi: { type: integer }
+        enZorlayanDers: { type: string }
+        kendiniHissediyorsun: { type: integer }
+    KonuIlerlemesi:
+      type: object
+      properties:
+        id: { type: integer }
+        konu: { type: string }
+        sira: { type: integer }
+        durum: { type: string }
+        tarih: { type: string, format: date, nullable: true }
+        kaynaklar:
+          type: array
+          items:
+            $ref: '#/components/schemas/Kaynak'
+    Kaynak:
+      type: object
+      properties:
+        id: { type: integer }
+        kaynak_adi: { type: string }
+        tamamlandi: { type: boolean }
+    CreateStudentPayload:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        password: { type: string }
+        teacherId: { type: string }
+        className: { type: string }
+        alan: { type: string }
+        phone: { type: string, nullable: true }
+        profilePhoto: { type: string, nullable: true }
+        meetingDay: { type: integer, nullable: true }
+        meetingDate: { type: string, format: date, nullable: true }
+      required: [firstName, lastName, email, password, teacherId, className, alan]
+    UpdateStudentPayload:
+      type: object
+      properties:
+        id: { type: string }
+        teacherId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        className: { type: string }
+        alan: { type: string }
+        profilePhoto: { type: string, nullable: true }
+        password: { type: string }
+        meetingDate: { type: string, format: date, nullable: true }
+      required: [id]
+    SaveGenelDenemePayload:
+      type: object
+      properties:
+        studentId: { type: string }
+        denemeAdi: { type: string }
+        denemeTarihi: { type: string, format: date }
+        notlar: { type: string, nullable: true }
+        sinavTipi: { type: string }
+        dersSonuclari:
+          type: array
+          items:
+            type: object
+            properties:
+              ders: { type: string }
+              soruSayisi: { type: integer }
+              dogru: { type: integer }
+              yanlis: { type: integer }
+              bos: { type: integer }
+              net: { type: number }
+        degerlendirme:
+          $ref: '#/components/schemas/GenelDenemeDegerlendirme'
+      required: [studentId, denemeAdi, denemeTarihi, degerlendirme]
+    SaveBransDenemePayload:
+      type: object
+      properties:
+        id: { type: string }
+        studentId: { type: string }
+        alan: { type: string }
+        ders: { type: string }
+        denemeAdi: { type: string }
+        denemeTarihi: { type: string, format: date }
+        soruSayisi: { type: integer }
+        dogru: { type: integer }
+        yanlis: { type: integer }
+        bos: { type: integer }
+        konular:
+          type: array
+          items:
+            $ref: '#/components/schemas/BransDenemeKonuSonucu'
+      required: [studentId, ders, denemeAdi, denemeTarihi]
+    SaveKonuIlerlemesiPayload:
+      type: object
+      properties:
+        studentId: { type: string }
+        ders: { type: string }
+        konular:
+          type: array
+          items:
+            type: object
+            properties:
+              konu: { type: string }
+              sira: { type: integer }
+              durum: { type: string }
+              tarih: { type: string, format: date, nullable: true }
+              kaynaklar:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kaynak_adi: { type: string }
+                    tamamlandi: { type: boolean }
+      required: [studentId, ders, konular]
+    CreateParentPayload:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        password: { type: string }
+        studentId: { type: string }
+        teacherId: { type: string }
+      required: [firstName, lastName, email, password, studentId, teacherId]
+    UpdateParentPayload:
+      type: object
+      properties:
+        _id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        password: { type: string }
+      required: [_id, firstName, lastName, email]

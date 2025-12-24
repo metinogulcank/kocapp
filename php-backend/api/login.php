@@ -72,6 +72,20 @@ if(!empty($data->email) && !empty($data->password)) {
     }
     
     if($foundUser && $userData) {
+        // Eğer veli ise, bağlı öğrenciyi bul
+        if ($userData['role'] === 'veli') {
+            try {
+                // ogrenciler tablosunda veli_id üzerinden öğrenciyi getir
+                $stmt = $db->prepare("SELECT id FROM ogrenciler WHERE veli_id = ? LIMIT 1");
+                $stmt->execute([$userData['id']]);
+                $linkedStudent = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($linkedStudent && !empty($linkedStudent['id'])) {
+                    $userData['studentId'] = $linkedStudent['id'];
+                }
+            } catch (Exception $e) {
+                // Sessizce devam et
+            }
+        }
         // JWT token oluştur (basit bir token sistemi)
         $token = base64_encode(json_encode(array(
             'id' => $userData['id'],
@@ -87,6 +101,7 @@ if(!empty($data->email) && !empty($data->password)) {
             "role" => $userData['role'],
             "firstName" => $userData['firstName'],
             "lastName" => $userData['lastName'],
+            "studentId" => isset($userData['studentId']) ? $userData['studentId'] : null,
             "token" => $token,
             "message" => "Giriş başarılı"
         ));

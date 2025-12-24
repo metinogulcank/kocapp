@@ -8,6 +8,7 @@ import OgretmenPanel from './components/OgretmenPanel';
 import OgretmenProfil from './components/OgretmenProfil';
 import OgrenciPanel from './components/OgrenciPanel';
 import OgrenciAiPanel from './components/OgrenciAiPanel';
+import VeliPanel from './components/VeliPanel';
 import './App.css';
 
 const OgrenciAiPanelWrapper = () => {
@@ -44,6 +45,7 @@ function App() {
           <Route path="/ogretmen-profil" element={<OgretmenProfil />} />
           <Route path="/ogrenci-panel" element={<OgrenciPanel />} />
           <Route path="/ogrenci-ai/:studentId" element={<OgrenciAiPanelWrapper />} />
+          <Route path="/veli-panel" element={<VeliPanel />} />
         </Routes>
       </div>
     </Router>

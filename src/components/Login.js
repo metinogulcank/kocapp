@@ -32,12 +32,16 @@ const Login = () => {
         localStorage.setItem('user', JSON.stringify({
           id: data.id,
           email: data.email,
-          role: data.role
+          role: data.role,
+          studentId: data.studentId || null,
+          linkedStudentId: data.studentId || null
         }));
       }
       
       if (data.role === 'ogretmen') {
         navigate('/ogretmen-panel');
+      } else if (data.role === 'veli') {
+        navigate('/veli-panel');
       } else {
         navigate('/ogrenci-panel');
       }

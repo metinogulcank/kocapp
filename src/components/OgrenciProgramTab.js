@@ -261,7 +261,7 @@ const createEmptyRoutineForm = () => ({
   soruSayisi: ''
 });
 
-const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
+const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnly = false }) => {
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -329,6 +329,17 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   const topicAnalysisModalHeaderRef = useRef(null);
   const topicAnalysisModalResizeRef = useRef(null);
 
+  const effectiveStudentId = useMemo(() => {
+    return (
+      student?.id ||
+      student?.student_id ||
+      student?.ogrenci_id ||
+      student?.userId ||
+      student?.user_id ||
+      null
+    );
+  }, [student]);
+
   const getSubjectColor = (ders) => {
     if (!ders) return null;
     const key = ders.toLowerCase();
@@ -348,7 +359,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   useEffect(() => {
     subjectColorMapRef.current = {};
     subjectColorIndexRef.current = 0;
-  }, [student?.id]);
+  }, [effectiveStudentId]);
 
   useEffect(() => {
     const handleDocumentClick = () => setOpenStatusDropdown(null);
@@ -477,10 +488,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
 
   // Öğrenci programını yükle
   useEffect(() => {
-    if (student?.id) {
+    if (effectiveStudentId) {
       fetchStudentProgram();
     }
-  }, [student?.id, currentWeek]);
+  }, [effectiveStudentId, currentWeek]);
 
   // Şablonları yükle
   useEffect(() => {
@@ -490,12 +501,12 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   }, [teacherId]);
 
   useEffect(() => {
-    if (student?.id) {
+    if (effectiveStudentId) {
       fetchStudentRoutines();
     } else {
       setRoutines([]);
     }
-  }, [student?.id]);
+  }, [effectiveStudentId]);
 
   const fetchStudentProgram = async () => {
     setLoading(true);
@@ -504,7 +515,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
       const endDate = weekDays[6].toISOString().split('T')[0];
       
       const response = await fetch(
-        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDate}&endDate=${endDate}`
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_program.php?studentId=${effectiveStudentId}&startDate=${startDate}&endDate=${endDate}`
       );
       const data = await response.json();
       
@@ -542,10 +553,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   };
 
   const fetchStudentRoutines = async () => {
-    if (!student?.id) return;
+    if (!effectiveStudentId) return;
     try {
       const response = await fetch(
-        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_routines.php?studentId=${student.id}`
+        `https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_student_routines.php?studentId=${effectiveStudentId}`
       );
       const data = await response.json();
       if (data.success && Array.isArray(data.routines)) {
@@ -1349,17 +1360,20 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
   };
 
   const handleDragStart = (e, program) => {
+    if (readOnly) return;
     setDraggedProgram(program);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/html', e.target);
   };
 
   const handleDragOver = (e) => {
+    if (readOnly) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = async (e, targetDay) => {
+    if (readOnly) return;
     e.preventDefault();
     
     if (!draggedProgram) return;
@@ -2163,7 +2177,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
             style={{ display: 'none' }}
             onChange={handleImportFileChange}
           />
-          {!isStudentPanel && (
+          {!isStudentPanel && !readOnly && (
             <>
               <button type="button" className="program-action-btn btn-ai" onClick={handleOpenAiAnalysis}>
                 <FontAwesomeIcon icon={faRobot} /> Yapay Zeka AI
@@ -2496,7 +2510,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                               
                           </div>
                           <div className="program-item-actions">
-                              {!isStudentPanel && !isRoutine && (
+                              {!isStudentPanel && !readOnly && !isRoutine && (
                                 <>
                                 <button
                                   className="edit-program-btn"
@@ -2520,7 +2534,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                 </button>
                                 </>
                               )}
-                              {!isStudentPanel && (
+                              {!isStudentPanel && !readOnly && (
                                 <button
                                   className="delete-program-btn"
                                   onClick={(e) => {
@@ -2660,10 +2674,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.dogru}
-                                      disabled={!isStudentPanel}
-                                      readOnly={!isStudentPanel}
+                                      disabled={!isStudentPanel || readOnly}
+                                      readOnly={!isStudentPanel || readOnly}
                                       onChange={(e) => {
-                                        if (!isStudentPanel) return;
+                                        if (!isStudentPanel || readOnly) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2703,10 +2717,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.yanlis}
-                                      disabled={!isStudentPanel}
-                                      readOnly={!isStudentPanel}
+                                      disabled={!isStudentPanel || readOnly}
+                                      readOnly={!isStudentPanel || readOnly}
                                       onChange={(e) => {
-                                        if (!isStudentPanel) return;
+                                        if (!isStudentPanel || readOnly) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2746,10 +2760,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                       inputMode="numeric"
                                       pattern="[0-9]*"
                                       value={currentInputs.bos}
-                                      disabled={!isStudentPanel}
-                                      readOnly={!isStudentPanel}
+                                      disabled={!isStudentPanel || readOnly}
+                                      readOnly={!isStudentPanel || readOnly}
                                       onChange={(e) => {
-                                        if (!isStudentPanel) return;
+                                        if (!isStudentPanel || readOnly) return;
                                         const value = e.target.value;
                                         // Sadece sayı girişine izin ver
                                         if (value === '' || /^\d+$/.test(value)) {
@@ -2783,7 +2797,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                                     />
                                   </div>
                                   {/* Kaydet butonu - sadece öğrenci için */}
-                                  {isStudentPanel && (
+                                  {isStudentPanel && !readOnly && (
                                     <button
                                       type="button"
                                       disabled={!hasChanges}
@@ -2925,7 +2939,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                     })}
                     
                     {/* Görev Ekle Butonu - Sadece öğretmen panelinde göster */}
-                    {!isStudentPanel && addingProgramDay?.getTime() !== day.getTime() && (
+                    {!isStudentPanel && !readOnly && addingProgramDay?.getTime() !== day.getTime() && (
                       <button
                         className="add-program-inline-btn"
                         onClick={() => handleAddProgramClick(day)}
@@ -2935,7 +2949,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
                     )}
                     
                     {/* Inline Program Ekleme Formu - Sadece öğretmen panelinde göster */}
-                    {!isStudentPanel && addingProgramDay?.getTime() === day.getTime() && (
+                    {!isStudentPanel && !readOnly && addingProgramDay?.getTime() === day.getTime() && (
                       <div
                         className="inline-program-form"
                         ref={addProgramFormRef}
@@ -3113,7 +3127,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false }) => {
       </div>
       </div>
 
-      {!isStudentPanel && (
+      {!isStudentPanel && !readOnly && (
       <div className="analysis-section">
         <div className="analysis-card teacher-analysis-card" ref={teacherAnalysisRef}>
           <div className="analysis-card-header">
@@ -4107,4 +4121,3 @@ const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) =>
 };
 
 export default OgrenciProgramTab;
-

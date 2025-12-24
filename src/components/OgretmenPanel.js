@@ -35,7 +35,8 @@ import {
   faGripVertical,
   faPlus,
   faCheck,
-  faTrash
+  faTrash,
+  faUserTie
 } from '@fortawesome/free-solid-svg-icons';
 import './OgretmenPanel.css';
 import studentImg from '../assets/student-img.png';
@@ -131,6 +132,7 @@ const OgretmenPanel = () => {
     { id: 'kaynak-konu-ilerlemesi', icon: faClipboardList, label: 'Kaynak ve Konu İlerlemesi' },
     { id: 'brans-denemeleri', icon: faBullseye, label: 'Brans Denemeleri' },
     { id: 'genel-denemeler', icon: faClock, label: 'Genel Denemeler' },
+    { id: 'veli-bilgileri', icon: faUserTie, label: 'Veli Bilgileri' },
     { id: 'yapay-zeka', icon: faRobot, label: 'Yapay Zeka' },
     { id: 'kaynak-onerileri', icon: faLightbulb, label: 'Kaynak Önerileri' }
   ];
@@ -374,6 +376,9 @@ const MEETING_DAY_OPTIONS = [
   const [bransView, setBransView] = useState('entry'); // 'entry' | 'charts'
   const [bransExamType, setBransExamType] = useState('tyt'); // 'tyt' veya 'ayt'
   const [genelDenemeFilter, setGenelDenemeFilter] = useState('son-deneme'); // 'son-deneme' | 'son-3' | 'son-5' | 'son-10'
+  const [denemeGrafikTab, setDenemeGrafikTab] = useState('genel'); // 'genel' | 'ders-bazli'
+  const [dersBazliGrafikSinavTipi, setDersBazliGrafikSinavTipi] = useState('tyt'); // 'tyt' | 'ayt'
+  const [dersBazliGrafikFiltre, setDersBazliGrafikFiltre] = useState('net'); // 'net' | 'dogru' | 'yanlis' | 'bos'
   const [genelDenemeView, setGenelDenemeView] = useState(null); // null | 'ekle' | 'grafikler' | 'analizler'
   const [genelDenemeTab, setGenelDenemeTab] = useState('ekle'); // 'ekle' | 'grafikler'
   const [genelDenemeSinavTipi, setGenelDenemeSinavTipi] = useState('tyt'); // 'tyt' | 'ayt'
@@ -477,6 +482,111 @@ const MEETING_DAY_OPTIONS = [
     if (normalized.includes('sosyal') || normalized.includes('vatandaslik') || normalized.includes('vatandaşlık')) return sosyalImg;
     return null;
   };
+
+  // Veli Bilgileri State
+  const [parentInfo, setParentInfo] = useState(null);
+  const [parentLoading, setParentLoading] = useState(false);
+  const [createParentLoading, setCreateParentLoading] = useState(false);
+  const [parentForm, setParentForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    password: ''
+  });
+
+  const fetchParentInfo = async () => {
+    if (!selectedStudent) return;
+    setParentLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/php-backend/api/get_parent_info.php?studentId=${selectedStudent.id}`);
+      const data = await response.json();
+      if (data.success) {
+        setParentInfo(data.parent);
+      }
+    } catch (error) {
+      console.error('Veli bilgileri alınamadı:', error);
+    } finally {
+      setParentLoading(false);
+    }
+  };
+
+  const [isEditingParent, setIsEditingParent] = useState(false);
+  
+  const handleUpdateParent = async (e) => {
+    e.preventDefault();
+    if (!parentInfo) return;
+
+    setCreateParentLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/php-backend/api/update_parent.php`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          _id: parentInfo._id,
+          ...parentForm
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Veli bilgileri güncellendi!');
+        fetchParentInfo();
+        setIsEditingParent(false);
+        setParentForm({ firstName: '', lastName: '', email: '', phone: '', password: '' });
+      } else {
+        alert(data.message || 'Bir hata oluştu');
+      }
+    } catch (error) {
+      console.error('Veli güncellenemedi:', error);
+      alert('Bir hata oluştu');
+    } finally {
+      setCreateParentLoading(false);
+    }
+  };
+
+  const handleCreateParent = async (e) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+    
+    setCreateParentLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user'));
+      const response = await fetch(`${API_BASE}/php-backend/api/create_parent.php`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...parentForm,
+          studentId: selectedStudent.id,
+          teacherId: user.id
+        }),
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        alert('Veli hesabı başarıyla oluşturuldu!');
+        fetchParentInfo();
+        setParentForm({ firstName: '', lastName: '', email: '', phone: '', password: '' });
+      } else {
+        alert(data.message || 'Bir hata oluştu');
+      }
+    } catch (error) {
+      console.error('Veli oluşturulamadı:', error);
+      alert('Bir hata oluştu');
+    } finally {
+      setCreateParentLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeMenu === 'veli-bilgileri' && selectedStudent) {
+      fetchParentInfo();
+    }
+  }, [activeMenu, selectedStudent]);
 
   // Öğrencileri backend'den çek
   const fetchStudents = () => {
@@ -1066,12 +1176,23 @@ const MEETING_DAY_OPTIONS = [
             if (!topicMap[konu]) {
               topicMap[konu] = {
                 total: 0,
-                yapildi: 0
+                yapildi: 0,
+                dogru: 0,
+                yanlis: 0,
+                bos: 0
               };
             }
             topicMap[konu].total += soruSayisi;
             if (prog.durum === 'yapildi') {
               topicMap[konu].yapildi += soruSayisi;
+            }
+            const d = parseInt(prog.dogru) || 0;
+            const y = parseInt(prog.yanlis) || 0;
+            const b = parseInt(prog.bos) || 0;
+            if (d || y || b) {
+              topicMap[konu].dogru += d;
+              topicMap[konu].yanlis += y;
+              topicMap[konu].bos += b;
             }
           });
           
@@ -1652,10 +1773,10 @@ const MEETING_DAY_OPTIONS = [
     }
   };
 
-  // TYT ve AYT ortalamalarını hesapla
+  // TYT, AYT ve diğer sınav tipleri için ortalamaları hesapla
   const calculateGenelDenemeOrtalamalari = useMemo(() => {
     if (!genelDenemeList || genelDenemeList.length === 0) {
-      return { tytOrtalama: 0, aytOrtalama: 0 };
+      return { tytOrtalama: 0, aytOrtalama: 0, digerOrtalama: 0 };
     }
 
     // Filtreye göre denemeleri al
@@ -1666,50 +1787,72 @@ const MEETING_DAY_OPTIONS = [
       filteredDenemeler = filteredDenemeler.slice(0, 5);
     } else if (genelDenemeFilter === 'son-10') {
       filteredDenemeler = filteredDenemeler.slice(0, 10);
+    } else if (genelDenemeFilter === 'tum-denemeler') {
+      // Tüm denemeler - filtreleme yapma
+      filteredDenemeler = filteredDenemeler;
     } else {
       // son-deneme
       filteredDenemeler = filteredDenemeler.slice(0, 1);
     }
 
-    // TYT ve AYT netlerini topla
+    // TYT, AYT ve diğer sınav tipleri (LGS, KPSS vs.) için netlerini topla
     let tytToplamNet = 0;
     let tytSayisi = 0;
     let aytToplamNet = 0;
     let aytSayisi = 0;
+    let digerToplamNet = 0;
+    let digerSayisi = 0;
 
     filteredDenemeler.forEach((deneme) => {
-      const sinavTipi = deneme.sinavTipi || 'tyt';
+      const sinavTipi = (deneme.sinavTipi || 'tyt').toLowerCase();
       const dersSonuclari = deneme.dersSonuclari || {};
       
       let toplamNet = 0;
-      Object.entries(dersSonuclari).forEach(([ders, data]) => {
-        // net değerini güvenli bir şekilde parse et
-        let netValue = 0;
-        if (data && data.net !== undefined && data.net !== null) {
-          netValue = parseFloat(data.net) || 0;
-        }
-        
-        if (sinavTipi === 'tyt' && ders.startsWith('TYT ')) {
+      
+      // TYT veya AYT için: sadece ilgili dersleri say
+      if (sinavTipi === 'tyt' || sinavTipi === 'ayt') {
+        Object.entries(dersSonuclari).forEach(([ders, data]) => {
+          let netValue = 0;
+          if (data && data.net !== undefined && data.net !== null) {
+            netValue = parseFloat(data.net) || 0;
+          }
+          
+          if (sinavTipi === 'tyt' && ders.startsWith('TYT ')) {
+            toplamNet += netValue;
+          } else if (sinavTipi === 'ayt' && ders.startsWith('AYT ')) {
+            toplamNet += netValue;
+          }
+        });
+      } else {
+        // LGS, KPSS gibi diğer sınav tipleri için: tüm derslerin netlerini topla
+        Object.entries(dersSonuclari).forEach(([ders, data]) => {
+          let netValue = 0;
+          if (data && data.net !== undefined && data.net !== null) {
+            netValue = parseFloat(data.net) || 0;
+          }
           toplamNet += netValue;
-        } else if (sinavTipi === 'ayt' && ders.startsWith('AYT ')) {
-          toplamNet += netValue;
-        }
-      });
+        });
+      }
 
-      // sinavTipi'ne göre say, toplamNet > 0 kontrolünü kaldır (0 net olsa bile sayılmalı)
+      // sinavTipi'ne göre say
       if (sinavTipi === 'tyt') {
         tytToplamNet += toplamNet;
         tytSayisi++;
       } else if (sinavTipi === 'ayt') {
         aytToplamNet += toplamNet;
         aytSayisi++;
+      } else {
+        // LGS, KPSS ve diğer sınav tipleri
+        digerToplamNet += toplamNet;
+        digerSayisi++;
       }
     });
 
     const tytOrtalama = tytSayisi > 0 ? parseFloat((tytToplamNet / tytSayisi).toFixed(2)) : 0;
     const aytOrtalama = aytSayisi > 0 ? parseFloat((aytToplamNet / aytSayisi).toFixed(2)) : 0;
+    const digerOrtalama = digerSayisi > 0 ? parseFloat((digerToplamNet / digerSayisi).toFixed(2)) : 0;
 
-    return { tytOrtalama, aytOrtalama };
+    return { tytOrtalama, aytOrtalama, digerOrtalama };
   }, [genelDenemeList, genelDenemeFilter]);
 
   // Genel denemeler sekmesine girildiğinde verileri yükle ve formu sıfırla
@@ -4761,7 +4904,18 @@ const MEETING_DAY_OPTIONS = [
                                     }}>
                                       <span>Çözülen: <strong style={{color: '#10b981'}}>{topicStats.yapildi}</strong></span>
                                       <span>Verilen: <strong style={{color: '#1f2937'}}>{topicStats.total}</strong></span>
-                        </div>
+                                    </div>
+                                    <div style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      fontSize: '13px',
+                                      color: '#6b7280',
+                                      marginTop: 8
+                                    }}>
+                                      <span>Doğru: <strong style={{color: '#065f46'}}>{topicStats.dogru || 0}</strong></span>
+                                      <span>Yanlış: <strong style={{color: '#b91c1c'}}>{topicStats.yanlis || 0}</strong></span>
+                                      <span>Boş: <strong style={{color: '#374151'}}>{topicStats.bos || 0}</strong></span>
+                                    </div>
                           </div>
                                 );
                               })}
@@ -5734,28 +5888,6 @@ const MEETING_DAY_OPTIONS = [
                     const studentAreaRaw = selectedStudent?.alan || '';
                     const studentArea = (studentAreaRaw || '').toLowerCase();
                     const isYks = studentArea.startsWith('yks');
-                    
-                    // LGS için ortalama hesaplama (tüm denemelerin ortalaması)
-                    let lgsOrtalama = 0;
-                    if (!isYks) {
-                      const filtered = genelDenemeList.filter(d => {
-                        if (genelDenemeFilter === 'son-deneme') return true;
-                        const count = parseInt(genelDenemeFilter.replace('son-', ''));
-                        return genelDenemeList.indexOf(d) < count;
-                      });
-                      if (filtered.length > 0) {
-                        const toplamNet = filtered.reduce((sum, d) => {
-                          const dersler = d.dersler || {};
-                          return sum + Object.values(dersler).reduce((dersSum, dersData) => {
-                            return dersSum + (Number(dersData.net) || 0);
-                          }, 0);
-                        }, 0);
-                        const toplamDers = filtered.reduce((sum, d) => {
-                          return sum + Object.keys(d.dersler || {}).length;
-                        }, 0);
-                        lgsOrtalama = toplamDers > 0 ? parseFloat((toplamNet / toplamDers).toFixed(2)) : 0;
-                      }
-                    }
 
                     if (isYks) {
                       return (
@@ -5800,7 +5932,7 @@ const MEETING_DAY_OPTIONS = [
                             <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>
                               {studentArea === 'lgs' ? 'LGS' : formatAreaLabel(studentAreaRaw)} Deneme Ortalaması
                             </div>
-                            <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{lgsOrtalama}</div>
+                            <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.digerOrtalama}</div>
                             <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
                           </div>
                         </div>
@@ -6373,23 +6505,82 @@ const MEETING_DAY_OPTIONS = [
                         >
                           Kapat
                         </button>
-                          </div>
+                      </div>
+
+                      {/* Tab Butonları */}
+                      <div style={{display: 'flex', gap: 12, marginBottom: 24, borderBottom: '2px solid #e5e7eb'}}>
+                        <button
+                          onClick={() => setDenemeGrafikTab('genel')}
+                          style={{
+                            padding: '12px 24px',
+                            borderRadius: '8px 8px 0 0',
+                            border: 'none',
+                            borderBottom: denemeGrafikTab === 'genel' ? '3px solid #6a1b9a' : '3px solid transparent',
+                            background: 'transparent',
+                            color: denemeGrafikTab === 'genel' ? '#6a1b9a' : '#6b7280',
+                            cursor: 'pointer',
+                            fontWeight: denemeGrafikTab === 'genel' ? 700 : 500,
+                            fontSize: 16,
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          Genel Deneme Grafiği
+                        </button>
+                        <button
+                          onClick={() => setDenemeGrafikTab('ders-bazli')}
+                          style={{
+                            padding: '12px 24px',
+                            borderRadius: '8px 8px 0 0',
+                            border: 'none',
+                            borderBottom: denemeGrafikTab === 'ders-bazli' ? '3px solid #6a1b9a' : '3px solid transparent',
+                            background: 'transparent',
+                            color: denemeGrafikTab === 'ders-bazli' ? '#6a1b9a' : '#6b7280',
+                            cursor: 'pointer',
+                            fontWeight: denemeGrafikTab === 'ders-bazli' ? 700 : 500,
+                            fontSize: 16,
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          Ders Bazlı Deneme Grafiği
+                        </button>
+                      </div>
+
+                      {/* Tab İçerikleri */}
+                      {denemeGrafikTab === 'genel' && (
+                        <>
                       {genelDenemeListLoading ? (
                         <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Yükleniyor...</div>
                       ) : genelDenemeList.length === 0 ? (
                         <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Henüz kayıtlı deneme yok.</div>
-                      ) : (
+                      ) : (() => {
+                      // Filtreye göre denemeleri al
+                      let filteredDenemeler = [...genelDenemeList];
+                      if (genelDenemeFilter === 'son-3') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 3);
+                      } else if (genelDenemeFilter === 'son-5') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 5);
+                      } else if (genelDenemeFilter === 'son-10') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 10);
+                      } else if (genelDenemeFilter === 'tum-denemeler') {
+                        // Tüm denemeler - filtreleme yapma
+                        filteredDenemeler = filteredDenemeler;
+                      } else {
+                        // son-deneme (varsayılan)
+                        filteredDenemeler = filteredDenemeler.slice(0, 1);
+                      }
+                      
+                      return (
                         <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20}}>
-                          {genelDenemeList.map((deneme) => {
+                          {filteredDenemeler.map((deneme) => {
                             const toplamNet = Object.values(deneme.dersSonuclari || {}).reduce((sum, d) => sum + (Number(d.net) || 0), 0);
                             return (
-                              <div key={deneme.id} style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, background: '#f9fafb'}}>
+                              <div key={deneme.id} style={{border: '1px solid #e5e7eb', borderRadius: 12, padding: 20, background: '#f9fafb',display:'flex',flexDirection:'column',gap:10}}>
                                 <div style={{marginBottom: 16}}>
                                   <div style={{fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 4}}>{deneme.denemeAdi}</div>
                                   <div style={{fontSize: 14, color: '#6b7280'}}>{deneme.denemeTarihi}</div>
                                   <div style={{marginTop: 8, fontSize: 16, fontWeight: 700, color: '#6a1b9a'}}>Toplam Net: {toplamNet.toFixed(2)}</div>
-                            </div>
-                                <div style={{height: 200, display: 'flex', alignItems: 'flex-end', gap: 4, paddingBottom: 20}}>
+                                </div>
+                                <div style={{height: 200, display: 'flex', alignItems: 'flex-end', gap: 4, marginTop: 10,paddingBottom: 20}}>
                                   {Object.entries(deneme.dersSonuclari || {}).map(([ders, data]) => {
                                     const net = Number(data.net) || 0;
                                     const maxNet = Math.max(...Object.values(deneme.dersSonuclari || {}).map(d => Number(d.net) || 0), 1);
@@ -6403,26 +6594,40 @@ const MEETING_DAY_OPTIONS = [
                                             height: `${Math.max(height, 3)}px`,
                                             background: barColor,
                                             borderRadius: '4px 4px 0 0',
-                                            position: 'relative'
+                                            position: 'relative',
+                                            display: 'flex',
+                                            alignItems: 'flex-end',
+                                            justifyContent: 'center',
+                                            paddingBottom: 4
                                           }}
                                           title={`${ders}: ${net.toFixed(2)}`}
                                         >
                                           <div style={{
-                                            position: 'absolute',
-                                            top: -18,
-                                            left: '50%',
-                                            transform: 'translateX(-50%)',
-                                            fontSize: 10,
-                                            fontWeight: 700,
-                                            color: '#111827',
-                                            whiteSpace: 'nowrap'
+                                            width: '100%',
+                                            display: 'flex',
+                                            alignItems: 'flex-end',
+                                            justifyContent: 'center',
+                                            height: '100%',
+                                            pointerEvents: 'none',
+                                            marginTop: 10,
                                           }}>
-                                            {net.toFixed(1)}
-                          </div>
-                        </div>
+                                            <span style={{
+                                              fontSize: 13,
+                                              fontWeight: 700,
+                                              color: '#fff',
+                                              background: 'rgba(0,0,0,0.22)',
+                                              borderRadius: 4,
+                                              padding: '1px 6px',
+                                              marginBottom: 2,
+                                              letterSpacing: 0.05,
+                                              boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
+                                            }}>
+                                              {net.toFixed(1)}
+                                            </span>
+                                          </div>
+                                        </div>
                                         <div style={{
                                           fontSize: 12,
-                                          margin: '12px 0',
                                           fontWeight: 600,
                                           color: '#111827',
                                           textAlign: 'center',
@@ -6432,20 +6637,361 @@ const MEETING_DAY_OPTIONS = [
                                           height: 40,
                                           display: 'flex',
                                           alignItems: 'center',
-                                          justifyContent: 'center'
+                                          justifyContent: 'center',
+                                          margin: '12px 0'
                                         }}>
                                           {ders.split(' ').pop()}
-                      </div>
-                          </div>
+                                        </div>
+                                      </div>
                                     );
                                   })}
-                          </div>
-                          </div>
+                                </div>
+                              </div>
                             );
                           })}
                         </div>
+                      );
+                      })()}
+                        </>
                       )}
-                      </div>
+
+                      {denemeGrafikTab === 'ders-bazli' && (
+                        <>
+                          {(() => {
+                            const studentAreaRaw = selectedStudent?.alan || '';
+                            const studentArea = (studentAreaRaw || '').toLowerCase();
+                            const isYks = studentArea.startsWith('yks');
+                            
+                            // YKS için TYT/AYT seçimi, diğerleri için direkt dersler
+                            let dersList = [];
+                            if (isYks) {
+                              const sinavTipi = dersBazliGrafikSinavTipi;
+                              dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw]?.filter(ders => 
+                                sinavTipi === 'tyt' ? ders.startsWith('TYT ') : ders.startsWith('AYT ')
+                              ) || [];
+                            } else {
+                              dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw] || [];
+                            }
+                            
+                            // Filtreye göre denemeleri al
+                            let filteredDenemeler = [...genelDenemeList];
+                            if (genelDenemeFilter === 'son-3') {
+                              filteredDenemeler = filteredDenemeler.slice(0, 3);
+                            } else if (genelDenemeFilter === 'son-5') {
+                              filteredDenemeler = filteredDenemeler.slice(0, 5);
+                            } else if (genelDenemeFilter === 'son-10') {
+                              filteredDenemeler = filteredDenemeler.slice(0, 10);
+                            } else if (genelDenemeFilter === 'tum-denemeler') {
+                              filteredDenemeler = filteredDenemeler;
+                            } else {
+                              filteredDenemeler = filteredDenemeler.slice(0, 1);
+                            }
+                            
+                            if (genelDenemeListLoading) {
+                              return <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Yükleniyor...</div>;
+                            }
+                            
+                            if (genelDenemeList.length === 0) {
+                              return <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>Henüz kayıtlı deneme yok.</div>;
+                            }
+                            
+                            return (
+                              <div>
+                                {/* YKS için TYT/AYT seçimi */}
+                                {isYks && (
+                                  <div style={{marginBottom: 24, display: 'flex', gap: 12}}>
+                                    <button
+                                      onClick={() => setDersBazliGrafikSinavTipi('tyt')}
+                                      style={{
+                                        padding: '10px 20px',
+                                        borderRadius: 8,
+                                        border: '1px solid #d1d5db',
+                                        background: dersBazliGrafikSinavTipi === 'tyt' ? '#6a1b9a' : 'white',
+                                        color: dersBazliGrafikSinavTipi === 'tyt' ? 'white' : '#374151',
+                                        cursor: 'pointer',
+                                        fontWeight: 600
+                                      }}
+                                    >
+                                      TYT
+                                    </button>
+                                    <button
+                                      onClick={() => setDersBazliGrafikSinavTipi('ayt')}
+                                      style={{
+                                        padding: '10px 20px',
+                                        borderRadius: 8,
+                                        border: '1px solid #d1d5db',
+                                        background: dersBazliGrafikSinavTipi === 'ayt' ? '#6a1b9a' : 'white',
+                                        color: dersBazliGrafikSinavTipi === 'ayt' ? 'white' : '#374151',
+                                        cursor: 'pointer',
+                                        fontWeight: 600
+                                      }}
+                                    >
+                                      AYT
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {/* Filtre Butonları */}
+                                <div style={{marginBottom: 24, display: 'flex', gap: 12, flexWrap: 'wrap'}}>
+                                  <button
+                                    onClick={() => setDersBazliGrafikFiltre('net')}
+                                    style={{
+                                      padding: '10px 20px',
+                                      borderRadius: 8,
+                                      border: '1px solid #3b82f6',
+                                      background: dersBazliGrafikFiltre === 'net' ? '#3b82f6' : 'white',
+                                      color: dersBazliGrafikFiltre === 'net' ? 'white' : '#3b82f6',
+                                      cursor: 'pointer',
+                                      fontWeight: 600
+                                    }}
+                                  >
+                                    Toplam Net
+                                  </button>
+                                  <button
+                                    onClick={() => setDersBazliGrafikFiltre('dogru')}
+                                    style={{
+                                      padding: '10px 20px',
+                                      borderRadius: 8,
+                                      border: '1px solid #10b981',
+                                      background: dersBazliGrafikFiltre === 'dogru' ? '#10b981' : 'white',
+                                      color: dersBazliGrafikFiltre === 'dogru' ? 'white' : '#10b981',
+                                      cursor: 'pointer',
+                                      fontWeight: 600
+                                    }}
+                                  >
+                                    Doğru
+                                  </button>
+                                  <button
+                                    onClick={() => setDersBazliGrafikFiltre('yanlis')}
+                                    style={{
+                                      padding: '10px 20px',
+                                      borderRadius: 8,
+                                      border: '1px solid #ef4444',
+                                      background: dersBazliGrafikFiltre === 'yanlis' ? '#ef4444' : 'white',
+                                      color: dersBazliGrafikFiltre === 'yanlis' ? 'white' : '#ef4444',
+                                      cursor: 'pointer',
+                                      fontWeight: 600
+                                    }}
+                                  >
+                                    Yanlış
+                                  </button>
+                                  <button
+                                    onClick={() => setDersBazliGrafikFiltre('bos')}
+                                    style={{
+                                      padding: '10px 20px',
+                                      borderRadius: 8,
+                                      border: '1px solid #6b7280',
+                                      background: dersBazliGrafikFiltre === 'bos' ? '#6b7280' : 'white',
+                                      color: dersBazliGrafikFiltre === 'bos' ? 'white' : '#6b7280',
+                                      cursor: 'pointer',
+                                      fontWeight: 600
+                                    }}
+                                  >
+                                    Boş
+                                  </button>
+                                </div>
+                                
+                                {/* Ders Bazlı Grafikler */}
+                                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(500px, 1fr))', gap: 24}}>
+                                  {dersList.map((ders) => {
+                                    // Bu ders için tüm denemelerden veri topla
+                                    let chartColor = '#3b82f6';
+                                    if (dersBazliGrafikFiltre === 'net') {
+                                      chartColor = '#3b82f6';
+                                    } else if (dersBazliGrafikFiltre === 'dogru') {
+                                      chartColor = '#10b981';
+                                    } else if (dersBazliGrafikFiltre === 'yanlis') {
+                                      chartColor = '#ef4444';
+                                    } else if (dersBazliGrafikFiltre === 'bos') {
+                                      chartColor = '#6b7280';
+                                    }
+                                    
+                                    const dersVerileri = filteredDenemeler.map(deneme => {
+                                      const dersData = deneme.dersSonuclari?.[ders];
+                                      if (!dersData) return null;
+                                      
+                                      let value = 0;
+                                      
+                                      if (dersBazliGrafikFiltre === 'net') {
+                                        value = Number(dersData.net) || 0;
+                                      } else if (dersBazliGrafikFiltre === 'dogru') {
+                                        value = Number(dersData.dogru) || 0;
+                                      } else if (dersBazliGrafikFiltre === 'yanlis') {
+                                        value = Number(dersData.yanlis) || 0;
+                                      } else if (dersBazliGrafikFiltre === 'bos') {
+                                        value = Number(dersData.bos) || 0;
+                                      }
+                                      
+                                      return {
+                                        denemeAdi: deneme.denemeAdi,
+                                        tarih: deneme.denemeTarihi,
+                                        value: value
+                                      };
+                                    }).filter(Boolean);
+                                    
+                                    if (dersVerileri.length === 0) return null;
+                                    
+                                    const rawMaxValue = Math.max(...dersVerileri.map(d => d.value), 0);
+                                    // maxValue'yu yukarı yuvarla (en yakın 5'in katına veya %10 ekle)
+                                    const maxValue = rawMaxValue > 0 ? Math.ceil(rawMaxValue * 1.1 / 5) * 5 : 5;
+                                    const chartHeight = 180;
+                                    
+                                    return (
+                                      <div key={ders} style={{
+                                        background: 'white',
+                                        borderRadius: 16,
+                                        padding: 24,
+                                        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                                        border: '1px solid #e5e7eb'
+                                      }}>
+                                        <h4 style={{fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 20}}>
+                                          {ders}
+                                        </h4>
+                                        
+                                        <div style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb'}}>
+                                          <div style={{position: 'relative', height: chartHeight}}>
+                                            {/* Y ekseni */}
+                                            <div style={{
+                                              position: 'absolute',
+                                              left: 0,
+                                              top: 0,
+                                              bottom: 0,
+                                              width: 30,
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              justifyContent: 'space-between',
+                                              paddingRight: 8
+                                            }}>
+                                              {[maxValue, maxValue * 0.75, maxValue * 0.5, maxValue * 0.25, 0].map((val, idx) => (
+                                                <div key={idx} style={{fontSize: 11, color: '#6b7280', textAlign: 'right'}}>
+                                                  {Math.round(val)}
+                                                </div>
+                                              ))}
+                                            </div>
+                                            
+                                            {/* Grafik alanı */}
+                                            <div style={{
+                                              marginLeft: 40,
+                                              position: 'relative',
+                                              height: chartHeight,
+                                              borderLeft: '1px solid #e5e7eb',
+                                              borderBottom: '1px solid #e5e7eb'
+                                            }}>
+                                              {/* Grid çizgileri */}
+                                              {[1, 2, 3, 4].map(val => (
+                                                <div
+                                                  key={val}
+                                                  style={{
+                                                    position: 'absolute',
+                                                    left: 0,
+                                                    right: 0,
+                                                    bottom: `${(val / 4) * 100}%`,
+                                                    borderTop: '1px dashed #e5e7eb'
+                                                  }}
+                                                />
+                                              ))}
+                                              
+                                              {/* Çubuklar */}
+                                              <div style={{
+                                                display: 'flex',
+                                                alignItems: 'flex-end',
+                                                height: '100%',
+                                                padding: '0 20px',
+                                                gap: 12,
+                                                justifyContent: 'center',
+                                                position: 'absolute',
+                                                bottom: 0,
+                                                left: 0,
+                                                right: 0
+                                              }}>
+                                                {dersVerileri.map((data, index) => {
+                                                  const heightPx = chartHeight * (data.value / maxValue);
+                                                  return (
+                                                    <div
+                                                      key={index}
+                                                      style={{
+                                                        flex: 1,
+                                                        minWidth: 36,
+                                                        maxWidth: 46,
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'flex-end',
+                                                        height: '100%'
+                                                      }}
+                                                    >
+                                                      {/* Değer - Çubukların üstünde */}
+                                                      {data.value > 0 && (
+                                                        <div style={{
+                                                          marginBottom: 4,
+                                                          fontSize: 12,
+                                                          fontWeight: 700,
+                                                          color: '#111827',
+                                                          minHeight: '16px',
+                                                          display: 'flex',
+                                                          alignItems: 'center'
+                                                        }}>
+                                                          {data.value}
+                                                        </div>
+                                                      )}
+                                                      
+                                                      {/* Çubuk */}
+                                                      <div style={{
+                                                        width: '100%',
+                                                        background: chartColor,
+                                                        borderRadius: '4px 4px 0 0',
+                                                        height: `${heightPx}px`,
+                                                        minHeight: data.value > 0 ? 5 : 0,
+                                                        position: 'relative',
+                                                        alignSelf: 'flex-end'
+                                                      }}>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                            
+                                            {/* Deneme adları - Grafik alanının dışında */}
+                                            <div style={{
+                                              marginLeft: 40,
+                                              marginTop: 12,
+                                              display: 'flex',
+                                              padding: '0 20px',
+                                              gap: 12,
+                                              justifyContent: 'center'
+                                            }}>
+                                              {dersVerileri.map((data, index) => (
+                                                <div
+                                                  key={index}
+                                                  style={{
+                                                    flex: 1,
+                                                    minWidth: 36,
+                                                    maxWidth: dersVerileri.length > 5 ? 20 : 80,
+                                                    fontSize: 11,
+                                                    color: '#6b7280',
+                                                    textAlign: 'center',
+                                                    writingMode: dersVerileri.length > 5 ? 'vertical-rl' : 'horizontal-tb',
+                                                    transform: dersVerileri.length > 5 ? 'rotate(180deg)' : 'none',
+                                                    wordBreak: 'break-word'
+                                                  }}
+                                                >
+                                                  {data.denemeAdi.length > 15 ? data.denemeAdi.substring(0, 12) + '...' : data.denemeAdi}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </div>
                   )}
 
                   {genelDenemeView === 'analizler' && (
@@ -6467,13 +7013,490 @@ const MEETING_DAY_OPTIONS = [
                           Kapat
                         </button>
                           </div>
-                      <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>
-                        Analiz içeriği buraya gelecek.
+                    {(() => {
+                      // Değerlendirme verilerini filtrele
+                      const denemelerWithDegerlendirme = genelDenemeList.filter(d => d.degerlendirme);
+                      
+                      if (denemelerWithDegerlendirme.length === 0) {
+                        return (
+                          <div style={{padding: 40, textAlign: 'center', color: '#6b7280'}}>
+                            Henüz değerlendirme verisi bulunmuyor.
                           </div>
+                        );
+                      }
+
+                      // Filtreye göre denemeleri al
+                      let filteredDenemeler = [...denemelerWithDegerlendirme];
+                      if (genelDenemeFilter === 'son-3') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 3);
+                      } else if (genelDenemeFilter === 'son-5') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 5);
+                      } else if (genelDenemeFilter === 'son-10') {
+                        filteredDenemeler = filteredDenemeler.slice(0, 10);
+                      } else if (genelDenemeFilter === 'tum-denemeler') {
+                        // Tüm denemeler - filtreleme yapma
+                        filteredDenemeler = filteredDenemeler;
+                      } else {
+                        // son-deneme (varsayılan)
+                        filteredDenemeler = filteredDenemeler.slice(0, 1);
+                      }
+
+                      const maxValue = 5; // 1-5 arası değerler
+                      const chartHeight = 180;
+
+                      return (
+                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(500px, 1fr))', gap: 24}}>
+                          {filteredDenemeler.map((deneme, index) => {
+                            const zamanYeterli = deneme.degerlendirme?.zamanYeterli || 0;
+                            const odaklanma = deneme.degerlendirme?.odaklanma || 0;
+                            const kaygiDuzeyi = deneme.degerlendirme?.kaygiDuzeyi || 0;
+                            const kendiniHissediyorsun = deneme.degerlendirme?.kendiniHissediyorsun || 0;
+                            const enZorlayanDers = deneme.degerlendirme?.enZorlayanDers || '';
+
+                            const metrics = [
+                              { label: 'Kaygı', value: kaygiDuzeyi, color: '#ef4444' },
+                              { label: 'Odak', value: odaklanma, color: '#10b981' },
+                              { label: 'Zaman', value: zamanYeterli, color: '#3b82f6' },
+                              { label: 'Enerji', value: kendiniHissediyorsun, color: '#f59e0b' }
+                            ];
+
+                            return (
+                              <div key={deneme.id || index} style={{
+                                background: 'white',
+                                borderRadius: 16,
+                                padding: 24,
+                                boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                                border: '1px solid #e5e7eb'
+                              }}>
+                                {/* Deneme Başlığı */}
+                                <div style={{marginBottom: 20}}>
+                                  <h4 style={{fontSize: 20, fontWeight: 700, color: '#111827', marginBottom: 4}}>
+                                    {deneme.denemeAdi}
+                                  </h4>
+                                  <div style={{fontSize: 14, color: '#6b7280'}}>
+                                    {deneme.denemeTarihi}
+                                  </div>
+                                </div>
+
+                                {/* Grafik */}
+                                <div style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb', marginBottom: 16}}>
+                                  <div style={{position: 'relative', height: chartHeight}}>
+                                    {/* Y ekseni etiketleri */}
+                                    <div style={{
+                                      position: 'absolute',
+                                      left: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 30,
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      justifyContent: 'space-between',
+                                      paddingRight: 8
+                                    }}>
+                                      {[5, 4, 3, 2, 1, 0].map(val => (
+                                        <div key={val} style={{fontSize: 11, color: '#6b7280', textAlign: 'right'}}>{val}</div>
+                                      ))}
+                                    </div>
+
+                                    {/* Grafik alanı */}
+                                    <div style={{
+                                      marginLeft: 40,
+                                      position: 'relative',
+                                      height: chartHeight,
+                                      borderLeft: '1px solid #e5e7eb',
+                                      borderBottom: '1px solid #e5e7eb'
+                                    }}>
+                                      {/* Grid çizgileri */}
+                                      {[1, 2, 3, 4, 5].map(val => (
+                                        <div
+                                          key={val}
+                                          style={{
+                                            position: 'absolute',
+                                            left: 0,
+                                            right: 0,
+                                            bottom: `${(val / maxValue) * 100}%`,
+                                            borderTop: '1px dashed #e5e7eb'
+                                          }}
+                                        />
+                                      ))}
+
+                                      {/* Metrik çubukları yan yana */}
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-end',
+                                        height: '100%',
+                                        padding: '0 30px',
+                                        gap: 30,
+                                        justifyContent: 'center',
+                                        position: 'absolute',
+                                        bottom: 0,
+                                        left: 0,
+                                        right: 0
+                                      }}>
+                                        {metrics.map((metric, metricIndex) => {
+                                          const heightPx = chartHeight * (metric.value / maxValue);
+                                          return (
+                                            <div
+                                              key={metricIndex}
+                                              style={{
+                                                flex: 1,
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                maxWidth: 100,
+                                                justifyContent: 'flex-end',
+                                                height: '100%'
+                                              }}
+                                            >
+                                              {/* Değer - Çubukların üstünde */}
+                                              {metric.value > 0 && (
+                                                <div style={{
+                                                  marginBottom: 4,
+                                                  fontSize: 14,
+                                                  fontWeight: 700,
+                                                  color: '#111827',
+                                                  minHeight: '16px',
+                                                  display: 'flex',
+                                                  alignItems: 'center'
+                                                }}>
+                                                  {metric.value}
+                                                </div>
+                                              )}
+
+                                              {/* Çubuk */}
+                                              <div style={{
+                                                width: '100%',
+                                                background: metric.color,
+                                                borderRadius: '4px 4px 0 0',
+                                                height: `${heightPx}px`,
+                                                minHeight: metric.value > 0 ? 4 : 0,
+                                                position: 'relative',
+                                                alignSelf: 'flex-end'
+                                              }}>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Metrik etiketleri - Grafik alanının dışında */}
+                                    <div style={{
+                                      marginLeft: 40,
+                                      marginTop: 12,
+                                      display: 'flex',
+                                      padding: '0 30px',
+                                      gap: 30,
+                                      justifyContent: 'center'
+                                    }}>
+                                      {metrics.map((metric, metricIndex) => (
+                                        <div
+                                          key={metricIndex}
+                                          style={{
+                                            flex: 1,
+                                            maxWidth: 100,
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            color: '#374151',
+                                            textAlign: 'center'
+                                          }}
+                                        >
+                                          {metric.label}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Zorlanan Ders */}
+                                {enZorlayanDers && (
+                                  <div style={{
+                                    padding: 12,
+                                    background: '#fef3c7',
+                                    borderRadius: 8,
+                                    border: '1px solid #fcd34d'
+                                  }}>
+                                    <div style={{
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      color: '#92400e',
+                                      marginBottom: 4
+                                    }}>
+                                      En Zorlanılan Ders:
+                                    </div>
+                                    <div style={{
+                                      fontSize: 14,
+                                      fontWeight: 700,
+                                      color: '#78350f'
+                                    }}>
+                                      {enZorlayanDers}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                           </div>
                   )}
                           </div>
                         </div>
+            ) : activeMenu === 'veli-bilgileri' ? (
+              <div className="veli-bilgileri-content" style={{padding: '32px', background: '#fafafa', minHeight: 'calc(100vh - 200px)'}}>
+                <div style={{maxWidth: '800px', margin: '0 auto'}}>
+                  <h1 style={{fontSize: 32, fontWeight: 700, margin: '0 0 32px 0', color: '#111827'}}>Veli Bilgileri</h1>
+                  
+                  {parentLoading ? (
+                    <div style={{textAlign: 'center', padding: 40}}>Yükleniyor...</div>
+                  ) : parentInfo ? (
+                    isEditingParent ? (
+                      <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24}}>
+                          <h2 style={{fontSize: 20, fontWeight: 700, color: '#111827', margin: 0}}>Veli Bilgilerini Düzenle</h2>
+                          <button
+                            onClick={() => {
+                              setIsEditingParent(false);
+                              setParentForm({ firstName: '', lastName: '', email: '', phone: '', password: '' });
+                            }}
+                            style={{background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 20}}
+                          >
+                            <FontAwesomeIcon icon={faTimes} />
+                          </button>
+                        </div>
+
+                        <form onSubmit={handleUpdateParent}>
+                          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20}}>
+                            <div>
+                              <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Ad</label>
+                              <input
+                                type="text"
+                                value={parentForm.firstName}
+                                onChange={(e) => setParentForm({...parentForm, firstName: e.target.value})}
+                                required
+                                style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                              />
+                            </div>
+                            <div>
+                              <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Soyad</label>
+                              <input
+                                type="text"
+                                value={parentForm.lastName}
+                                onChange={(e) => setParentForm({...parentForm, lastName: e.target.value})}
+                                required
+                                style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                              />
+                            </div>
+                          </div>
+                          
+                          <div style={{marginBottom: 20}}>
+                            <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>E-posta Adresi</label>
+                            <input
+                              type="email"
+                              value={parentForm.email}
+                              onChange={(e) => setParentForm({...parentForm, email: e.target.value})}
+                              required
+                              style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                          </div>
+                          
+                          <div style={{marginBottom: 20}}>
+                            <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Telefon Numarası</label>
+                            <input
+                              type="tel"
+                              value={parentForm.phone}
+                              onChange={(e) => setParentForm({...parentForm, phone: e.target.value})}
+                              style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                          </div>
+                          
+                          <div style={{marginBottom: 32}}>
+                            <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Yeni Şifre (İsteğe Bağlı)</label>
+                            <input
+                              type="text"
+                              value={parentForm.password}
+                              onChange={(e) => setParentForm({...parentForm, password: e.target.value})}
+                              placeholder="Değiştirmek istemiyorsanız boş bırakın"
+                              style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                          </div>
+                          
+                          <button
+                            type="submit"
+                            disabled={createParentLoading}
+                            style={{
+                              width: '100%',
+                              padding: '14px',
+                              background: '#6a1b9a',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: 12,
+                              fontSize: 16,
+                              fontWeight: 600,
+                              cursor: createParentLoading ? 'not-allowed' : 'pointer',
+                              opacity: createParentLoading ? 0.7 : 1
+                            }}
+                          >
+                            {createParentLoading ? 'Güncelleniyor...' : 'Güncelle'}
+                          </button>
+                        </form>
+                      </div>
+                    ) : (
+                    <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                      <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32}}>
+                        <div style={{display: 'flex', alignItems: 'center', gap: 20}}>
+                          <div style={{width: 80, height: 80, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5', fontSize: 32}}>
+                            <FontAwesomeIcon icon={faUserTie} />
+                          </div>
+                          <div>
+                            <h2 style={{margin: 0, fontSize: 24, fontWeight: 700, color: '#111827'}}>
+                              {parentInfo.firstName} {parentInfo.lastName}
+                            </h2>
+                            <div style={{color: '#6b7280', marginTop: 4}}>Öğrenci Velisi</div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setParentForm({
+                              firstName: parentInfo.firstName,
+                              lastName: parentInfo.lastName,
+                              email: parentInfo.email,
+                              phone: parentInfo.phone || '',
+                              password: ''
+                            });
+                            setIsEditingParent(true);
+                          }}
+                          style={{
+                            padding: '10px 20px',
+                            background: '#f3f4f6',
+                            color: '#374151',
+                            border: '1px solid #d1d5db',
+                            borderRadius: 8,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8
+                          }}
+                        >
+                          Düzenle
+                        </button>
+                      </div>
+                      
+                      <div style={{display: 'grid', gap: 24}}>
+                        <div style={{display: 'flex', alignItems: 'center', gap: 16, padding: 16, background: '#f9fafb', borderRadius: 12}}>
+                          <div style={{width: 40, height: 40, borderRadius: 10, background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', border: '1px solid #e5e7eb'}}>
+                            <FontAwesomeIcon icon={faPaperPlane} />
+                          </div>
+                          <div>
+                            <div style={{fontSize: 13, color: '#6b7280', marginBottom: 2}}>E-posta Adresi</div>
+                            <div style={{fontSize: 16, fontWeight: 600, color: '#111827'}}>{parentInfo.email}</div>
+                          </div>
+                        </div>
+                        
+                        <div style={{display: 'flex', alignItems: 'center', gap: 16, padding: 16, background: '#f9fafb', borderRadius: 12}}>
+                          <div style={{width: 40, height: 40, borderRadius: 10, background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', border: '1px solid #e5e7eb'}}>
+                            <FontAwesomeIcon icon={faPhone} />
+                          </div>
+                          <div>
+                            <div style={{fontSize: 13, color: '#6b7280', marginBottom: 2}}>Telefon Numarası</div>
+                            <div style={{fontSize: 16, fontWeight: 600, color: '#111827'}}>{parentInfo.phone || '-'}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    )
+                  ) : (
+                    <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+                      <div style={{textAlign: 'center', marginBottom: 32}}>
+                        <div style={{width: 64, height: 64, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 24, margin: '0 auto 16px'}}>
+                          <FontAwesomeIcon icon={faUserTie} />
+                        </div>
+                        <h2 style={{fontSize: 20, fontWeight: 700, color: '#111827', margin: 0}}>Veli Hesabı Oluştur</h2>
+                        <p style={{color: '#6b7280', marginTop: 8}}>Bu öğrenci için henüz bir veli hesabı tanımlanmamış.</p>
+                      </div>
+                      
+                      <form onSubmit={handleCreateParent}>
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20}}>
+                          <div>
+                            <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Ad</label>
+                            <input
+                              type="text"
+                              value={parentForm.firstName}
+                              onChange={(e) => setParentForm({...parentForm, firstName: e.target.value})}
+                              required
+                              style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                          </div>
+                          <div>
+                            <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Soyad</label>
+                            <input
+                              type="text"
+                              value={parentForm.lastName}
+                              onChange={(e) => setParentForm({...parentForm, lastName: e.target.value})}
+                              required
+                              style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                            />
+                          </div>
+                        </div>
+                        
+                        <div style={{marginBottom: 20}}>
+                          <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>E-posta Adresi</label>
+                          <input
+                            type="email"
+                            value={parentForm.email}
+                            onChange={(e) => setParentForm({...parentForm, email: e.target.value})}
+                            required
+                            style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                          />
+                        </div>
+                        
+                        <div style={{marginBottom: 20}}>
+                          <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Telefon Numarası</label>
+                          <input
+                            type="tel"
+                            value={parentForm.phone}
+                            onChange={(e) => setParentForm({...parentForm, phone: e.target.value})}
+                            style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                          />
+                        </div>
+                        
+                        <div style={{marginBottom: 32}}>
+                          <label style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8}}>Şifre</label>
+                          <input
+                            type="text"
+                            value={parentForm.password}
+                            onChange={(e) => setParentForm({...parentForm, password: e.target.value})}
+                            required
+                            placeholder="En az 6 karakter"
+                            style={{width: '100%', padding: '12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
+                          />
+                        </div>
+                        
+                        <button
+                          type="submit"
+                          disabled={createParentLoading}
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            background: '#6a1b9a',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 12,
+                            fontSize: 16,
+                            fontWeight: 600,
+                            cursor: createParentLoading ? 'not-allowed' : 'pointer',
+                            opacity: createParentLoading ? 0.7 : 1
+                          }}
+                        >
+                          {createParentLoading ? 'Oluşturuluyor...' : 'Veli Hesabı Oluştur'}
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : activeMenu === 'yapay-zeka' ? (
               <div className="yapay-zeka-content" style={{padding: '32px', background: '#fafafa', minHeight: 'calc(100vh - 200px)'}}>
                 <div style={{maxWidth: '1400px', margin: '0 auto'}}>
@@ -9051,4 +10074,3 @@ const MEETING_DAY_OPTIONS = [
 };
 
 export default OgretmenPanel;
-

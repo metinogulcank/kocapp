@@ -66,7 +66,7 @@ try {
     // Şifreyi hashle
     $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
-    // Users tablosuna veli ekle
+    // Users tablosuna veli ekle (studentId kolonunu ayrıca güncelleyeceğiz)
     $insertUserStmt = $db->prepare("
         INSERT INTO users (_id, firstName, lastName, email, phone, passwordHash, role, createdAt, updatedAt)
         VALUES (?, ?, ?, ?, ?, ?, 'veli', NOW(), NOW())
@@ -87,15 +87,15 @@ try {
 
     // Öğrenci-veli ilişkisini kaydet (ogrenciler tablosuna veli_id ekle)
     // Önce ogrenciler tablosunda veli_id kolonu var mı kontrol et, yoksa ekle
-    try {
-        $checkColumnStmt = $db->query("SHOW COLUMNS FROM ogrenciler LIKE 'veli_id'");
-        if ($checkColumnStmt->rowCount() === 0) {
+    $checkColumnStmt = $db->query("SHOW COLUMNS FROM ogrenciler LIKE 'veli_id'");
+    if ($checkColumnStmt->rowCount() === 0) {
+        try {
             // veli_id kolonu yoksa ekle
-            $db->exec("ALTER TABLE ogrenciler ADD COLUMN veli_id VARCHAR(24) NULL AFTER ogretmen_id");
+            $db->exec("ALTER TABLE ogrenciler ADD COLUMN veli_id VARCHAR(24) NULL");
             $db->exec("ALTER TABLE ogrenciler ADD INDEX idx_veli_id (veli_id)");
+        } catch (Exception $e) {
+            throw new Exception("Tablo yapısı güncellenemedi: " . $e->getMessage());
         }
-    } catch (Exception $e) {
-        // Kolon zaten varsa veya başka bir hata varsa devam et
     }
 
     // Öğrenciye veli ID'sini ekle
@@ -108,10 +108,19 @@ try {
         throw new Exception('Öğrenci-veli ilişkisi kaydedilemedi');
     }
 
+    // Users tablosunda veliye bağlı öğrenci bilgisini kaydet (studentId kolonu mevcutsa)
+    try {
+        $updateParentLinkStmt = $db->prepare("UPDATE users SET studentId = ? WHERE _id = ?");
+        $updateParentLinkStmt->execute([$studentId, $veliId]);
+    } catch (Exception $e) {
+        // Kolon yoksa sessizce devam et
+    }
+
     echo json_encode([
         'success' => true,
         'message' => 'Veli başarıyla oluşturuldu',
-        'id' => $veliId
+        'id' => $veliId,
+        'studentId' => $studentId
     ]);
 } catch (Exception $e) {
     http_response_code(500);
@@ -121,4 +130,3 @@ try {
     ]);
 }
 ?>
-

@@ -983,11 +983,19 @@ const OgrenciPanel = () => {
             }
 
             if (!topicMap[konu]) {
-              topicMap[konu] = { total: 0, yapildi: 0 };
+              topicMap[konu] = { total: 0, yapildi: 0, dogru: 0, yanlis: 0, bos: 0 };
             }
             topicMap[konu].total += soruSayisi;
             if (prog.durum === 'yapildi') {
               topicMap[konu].yapildi += soruSayisi;
+            }
+            const d = parseInt(prog.dogru) || 0;
+            const y = parseInt(prog.yanlis) || 0;
+            const b = parseInt(prog.bos) || 0;
+            if (d || y || b) {
+              topicMap[konu].dogru += d;
+              topicMap[konu].yanlis += y;
+              topicMap[konu].bos += b;
             }
           });
 
@@ -3356,11 +3364,22 @@ const OgrenciPanel = () => {
                                     <span>Çözülen: <strong style={{color: '#10b981'}}>{topicStats.yapildi}</strong></span>
                                     <span>Verilen: <strong style={{color: '#1f2937'}}>{topicStats.total}</strong></span>
                                   </div>
+                                  <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    fontSize: '13px',
+                                    color: '#6b7280',
+                                    marginTop: 8
+                                  }}>
+                                    <span>Doğru: <strong style={{color: '#065f46'}}>{topicStats.dogru || 0}</strong></span>
+                                    <span>Yanlış: <strong style={{color: '#b91c1c'}}>{topicStats.yanlis || 0}</strong></span>
+                                    <span>Boş: <strong style={{color: '#374151'}}>{topicStats.bos || 0}</strong></span>
+                                  </div>
                                 </div>
                               );
                             })}
-                        </div>
-                      ) : (
+                          </div>
+                        ) : (
                         <div style={{
                           textAlign: 'center',
                           padding: '60px 20px',
