@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faHome,
+  faBell,
   faSignOutAlt, 
   faCalendarAlt, 
   faChartPie, 
@@ -22,9 +23,10 @@ import {
   faUser
 } from '@fortawesome/free-solid-svg-icons';
 import './OgretmenPanel.css';
+import Bildirimler from './Bildirimler';
 import OgrenciProgramTab from './OgrenciProgramTab';
 import Kaynaklar from './Kaynaklar';
-import { EXAM_CATEGORY_OPTIONS, EXAM_SUBJECTS_BY_AREA } from '../constants/examSubjects';
+import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
 
 // Ders görselleri
 import cografyaImg from '../assets/cografya.png';
@@ -43,10 +45,28 @@ import tumKimyaImg from '../assets/tum_kimya.png';
 import tumMatematikImg from '../assets/tum_matematik.png';
 import tumTurkceImg from '../assets/tum_turkce.png';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'https://vedatdaglarmuhendislik.com.tr';
+const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
+
+const safeFetchJson = async (url, options = {}) => {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError, "URL:", url, "Raw response:", text);
+      return { success: false, message: "Geçersiz JSON yanıtı", raw: text };
+    }
+  } catch (fetchError) {
+    console.error("Fetch error:", fetchError, "URL:", url);
+    return { success: false, message: "İstek hatası" };
+  }
+};
 
 // Alan kodunu (yks_say vb.) okunur etikete çevir
-const formatAreaLabel = (area) => {
+const formatAreaLabel = (area, studentInfo = null) => {
+  if (studentInfo && studentInfo.alanName) return studentInfo.alanName;
+  if (studentInfo && studentInfo.alan && studentInfo.alan.includes(' - ')) return studentInfo.alan;
   if (!area) return '';
   const allOptions = EXAM_CATEGORY_OPTIONS.flatMap(group => group.options || []);
   const found = allOptions.find(opt => opt.value === area);
@@ -123,6 +143,40 @@ const VeliPanel = () => {
   const [questionStatsLoading, setQuestionStatsLoading] = useState(false);
   const [activeQuestionTab, setActiveQuestionTab] = useState('konu-dagilimi');
   const [selectedQuestionExamArea, setSelectedQuestionExamArea] = useState(null);
+  const [examComponents, setExamComponents] = useState([]);
+  const [examComponentsLoading, setExamComponentsLoading] = useState(false);
+
+  // Dinamik ders listesi alma yardımcı fonksiyonu
+  const getDersList = (examCompId, fallbackArea) => {
+    const selectedComp = examComponents.find(c => c.id === examCompId);
+    if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
+      return selectedComp.dersler;
+    }
+
+    const studentAreaRaw = fallbackArea || student?.alan || '';
+    const studentArea = (studentAreaRaw || '').toLowerCase();
+    const fallbackDersList = [];
+    
+    // Eğer examComponents yüklüyse ve içinde dersler varsa, tüm dersleri birleştirip fallback yapabiliriz
+    if (examComponents.length > 0) {
+      examComponents.forEach(c => {
+        if (c.dersler) {
+          c.dersler.forEach(d => {
+            if (!fallbackDersList.includes(d)) fallbackDersList.push(d);
+          });
+        }
+      });
+    }
+
+    if (studentArea.startsWith('yks')) {
+      if (examCompId === 'tyt') {
+        return fallbackDersList.filter(d => d.startsWith('TYT ') || !d.includes('AYT '));
+      } else if (examCompId === 'ayt') {
+        return fallbackDersList.filter(d => d.startsWith('AYT '));
+      }
+    }
+    return fallbackDersList;
+  };
   const [questionDistributionPeriod, setQuestionDistributionPeriod] = useState('gunluk');
   const [questionDistributionStats, setQuestionDistributionStats] = useState({});
   const [questionDistributionLoading, setQuestionDistributionLoading] = useState(false);
@@ -145,6 +199,7 @@ const VeliPanel = () => {
   const [konuIlerlemesi, setKonuIlerlemesi] = useState([]);
   const [konuIlerlemesiLoading, setKonuIlerlemesiLoading] = useState(false);
   const [bransDenemeList, setBransDenemeList] = useState([]);
+  const [bransExamType, setBransExamType] = useState('tyt');
   const [bransDenemelerLoading, setBransDenemelerLoading] = useState(false);
   const [genelDenemeFilter, setGenelDenemeFilter] = useState('son-deneme');
   const [genelDenemeList, setGenelDenemeList] = useState([]);
@@ -162,6 +217,7 @@ const VeliPanel = () => {
   
   const menuItems = [
     { id: 'ana-sayfa', icon: faHome, label: 'Ana Sayfa' },
+    { id: 'bildirimler', icon: faBell, label: 'Bildirimler' },
     { id: 'plan-program', icon: faBook, label: 'Plan/ Program' },
     { id: 'gunluk-soru', icon: faStickyNote, label: 'Soru/Süre/Konu Dağılımı' },
     { id: 'ders-basari', icon: faTrophy, label: 'Ders/Konu Bazlı Başarım' },
@@ -174,8 +230,7 @@ const VeliPanel = () => {
 
   const fetchParentInfoByStudentId = async (studentId) => {
     try {
-      const res = await fetch(`${API_BASE}/php-backend/api/get_parent_info.php?studentId=${studentId}`);
-      const data = await res.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_parent_info.php?studentId=${studentId}`);
       if (data && data.success && data.parent) {
         const p = data.parent;
         const normalized = {
@@ -225,8 +280,7 @@ const VeliPanel = () => {
       loadByStudentId(studentId);
     } else {
       // Fallback: Parent ID ile öğrenci bilgisi çek
-      fetch(`${API_BASE}/php-backend/api/get_student_by_parent.php?parentId=${user.id}`)
-        .then(r => r.json())
+      safeFetchJson(`${API_BASE}/php-backend/api/get_student_by_parent.php?parentId=${user.id}`)
         .then(data => {
           if (data.success && data.student && data.student.id) {
             setStudent(data.student);
@@ -258,15 +312,18 @@ const VeliPanel = () => {
   useEffect(() => {
     if (activeMenu === 'gunluk-soru' && student?.id) {
       fetchQuestionStatsForStudent(student.id);
+      fetchExamComponents(student.id);
     }
   }, [activeMenu, student]);
 
   useEffect(() => {
     if (activeMenu !== 'gunluk-soru') return;
     if (activeQuestionTab === 'soru-dagilimi') {
-      setSelectedQuestionExamArea(null);
       setQuestionDistributionPeriod('gunluk');
       setQuestionDistributionStats({});
+      if (!selectedQuestionExamArea && examComponents.length > 0) {
+        setSelectedQuestionExamArea(examComponents[0].id);
+      }
     }
     if (activeQuestionTab === 'konu-dagilimi') {
       setSelectedExamArea(null);
@@ -276,7 +333,13 @@ const VeliPanel = () => {
     if (activeQuestionTab === 'sure-dagilimi') {
       fetchTimeDistributionStatsForStudent();
     }
-  }, [activeQuestionTab, activeMenu]);
+  }, [activeQuestionTab, activeMenu, examComponents, selectedQuestionExamArea]);
+
+  useEffect(() => {
+    if (activeMenu === 'gunluk-soru' && activeQuestionTab === 'soru-dagilimi' && student?.id) {
+      fetchQuestionDistributionStatsForStudent();
+    }
+  }, [activeMenu, activeQuestionTab, student, selectedQuestionExamArea, questionDistributionPeriod]);
 
   useEffect(() => {
     if (selectedSubject && allPrograms.length > 0) {
@@ -339,10 +402,49 @@ const VeliPanel = () => {
     }
   }, [parent]);
 
+  const fetchExamComponents = async (studentId) => {
+    if (!studentId) return;
+    setExamComponentsLoading(true);
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_exam_components.php?studentId=${studentId}`);
+      if (data.success) {
+        setExamComponents(data.components || []);
+        
+        // Eğer bileşenler varsa, varsayılan olarak ilkini seç
+        if (data.components && data.components.length > 0) {
+          const firstCompId = data.components[0].id;
+          
+          // Eğer tek bir bileşen varsa veya henüz seçim yapılmamışsa otomatik seç
+          if (data.components.length === 1 || !selectedQuestionExamArea) {
+            setSelectedQuestionExamArea(firstCompId);
+          }
+          if (data.components.length === 1 || !selectedExamArea) {
+            setSelectedExamArea(firstCompId);
+          }
+          if (data.components.length === 1 || !dersBasariExamType || dersBasariExamType === 'tyt') {
+            setDersBasariExamType(firstCompId);
+          }
+          if (data.components.length === 1 || !ilerlemeExamType || ilerlemeExamType === 'tyt') {
+            setIlerlemeExamType(firstCompId);
+          }
+          if (data.components.length === 1 || !dersBazliGrafikSinavTipi || dersBazliGrafikSinavTipi === 'tyt') {
+             setDersBazliGrafikSinavTipi(firstCompId);
+           }
+           if (data.components.length === 1 || !bransExamType || bransExamType === 'tyt') {
+             setBransExamType(firstCompId);
+           }
+         }
+      }
+    } catch (error) {
+      console.error('Sınav bileşenleri yüklenemedi:', error);
+    } finally {
+      setExamComponentsLoading(false);
+    }
+  };
+
   const fetchStudentInfo = async (studentId) => {
     try {
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
-      const data = await response.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
       if (data.success && data.student) {
         setStudent(data.student);
         
@@ -383,15 +485,13 @@ const VeliPanel = () => {
       const startDate = weekStart.toISOString().split('T')[0];
       const endDate = weekEnd.toISOString().split('T')[0];
       const todayStr = today.toISOString().split('T')[0];
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=${startDate}&endDate=${endDate}`);
-      const data = await response.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=${startDate}&endDate=${endDate}`);
       if (data.success && data.programs) {
         let todayRequired = 0;
         let weekRequired = 0;
         let weekPending = 0;
         let totalSolved = 0;
-        const allTimeResponse = await fetch(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=${todayStr}`);
-        const allTimeData = await allTimeResponse.json();
+        const allTimeData = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=${todayStr}`);
         const allProgramsAllTime = allTimeData.success ? allTimeData.programs : [];
         allProgramsAllTime.forEach(prog => {
           if (prog.soru_sayisi && (prog.durum === 'yapildi' || prog.durum === 'eksik_yapildi')) {
@@ -419,7 +519,7 @@ const VeliPanel = () => {
   };
 
   const fetchQuestionDistributionStatsForStudent = async () => {
-    if (!student || !student.id || !selectedQuestionExamArea) return;
+    if (!student || !student.id) return;
     setQuestionDistributionLoading(true);
     try {
       const today = new Date();
@@ -465,24 +565,33 @@ const VeliPanel = () => {
       }
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`);
-      const data = await response.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`);
       if (data.success && data.programs) {
         const subjectMap = {};
         const processedPrograms = new Set();
         data.programs.forEach(prog => {
-          if (prog.durum !== 'yapildi') return;
-          if (prog.ders && (prog.program_tipi === 'soru_cozum' || prog.soru_sayisi)) {
+          const dogru = parseInt(prog.dogru) || 0;
+          const yanlis = parseInt(prog.yanlis) || 0;
+          const bos = parseInt(prog.bos) || 0;
+          const totalAnswered = dogru + yanlis + bos;
+          const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+          if (prog.durum !== 'yapildi' && totalAnswered === 0) return;
+          if (prog.ders && (prog.program_tipi === 'soru_cozum' || prog.soru_sayisi || totalAnswered > 0)) {
             const subject = prog.ders;
-            const soruSayisi = parseInt(prog.soru_sayisi) || 0;
-            if (soruSayisi === 0) return;
+            let effectiveSolved = 0;
+            if (prog.durum === 'yapildi') {
+              effectiveSolved = totalAnswered > 0 ? totalAnswered : soruSayisi;
+            } else {
+              effectiveSolved = totalAnswered;
+            }
+            if (effectiveSolved === 0) return;
             const programKey = prog.id ? `prog_${prog.id}` : prog.routine_id ? `routine_${prog.routine_id}_${prog.tarih}_${prog.ders}_${soruSayisi}` : `${prog.tarih}_${prog.ders}_${prog.baslangic_saati}_${soruSayisi}`;
             if (processedPrograms.has(programKey)) return;
             processedPrograms.add(programKey);
             if (!subjectMap[subject]) {
               subjectMap[subject] = { yapildi: 0 };
             }
-            subjectMap[subject].yapildi += soruSayisi;
+            subjectMap[subject].yapildi += effectiveSolved;
           }
         });
         setQuestionDistributionStats(subjectMap);
@@ -527,8 +636,7 @@ const VeliPanel = () => {
       }
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = today.toISOString().split('T')[0];
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`);
-      const data = await response.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`);
       if (data.success && data.programs) {
         const currentWeekStart = new Date(today);
         const dayOfWeek = currentWeekStart.getDay();
@@ -610,7 +718,7 @@ const VeliPanel = () => {
     subjectPrograms.forEach(prog => {
       const topic = prog.konu || 'Belirtilmemiş';
       if (!topicMap[topic]) {
-        topicMap[topic] = { total: 0, yapildi: 0, eksik_yapildi: 0, yapilmadi: 0 };
+        topicMap[topic] = { total: 0, yapildi: 0, eksik_yapildi: 0, yapilmadi: 0, dogru: 0, yanlis: 0, bos: 0 };
       }
       const soruSayisi = parseInt(prog.soru_sayisi) || 0;
       topicMap[topic].total += soruSayisi;
@@ -621,16 +729,27 @@ const VeliPanel = () => {
       } else {
         topicMap[topic].yapilmadi += soruSayisi;
       }
+      
+      const d = parseInt(prog.dogru) || 0;
+      const y = parseInt(prog.yanlis) || 0;
+      const b = parseInt(prog.bos) || 0;
+      topicMap[topic].dogru += d;
+      topicMap[topic].yanlis += y;
+      topicMap[topic].bos += b;
     });
     const statsWithPercentages = {};
     Object.keys(topicMap).forEach(topic => {
       const stats = topicMap[topic];
       const total = stats.total;
+      const totalSolved = stats.dogru + stats.yanlis + stats.bos;
+      
       statsWithPercentages[topic] = {
         ...stats,
         yapildiPercent: total > 0 ? Math.round((stats.yapildi / total) * 100) : 0,
         eksik_yapildiPercent: total > 0 ? Math.round((stats.eksik_yapildi / total) * 100) : 0,
-        yapilmadiPercent: total > 0 ? Math.round((stats.yapilmadi / total) * 100) : 0
+        yapilmadiPercent: total > 0 ? Math.round((stats.yapilmadi / total) * 100) : 0,
+        basariYuzdesi: totalSolved > 0 ? Math.round((stats.dogru / totalSolved) * 100) : 0,
+        totalSolved
       };
     });
     return statsWithPercentages;
@@ -642,8 +761,7 @@ const VeliPanel = () => {
     try {
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=2020-01-01&endDate=${todayStr}`);
-      const data = await response.json();
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=2020-01-01&endDate=${todayStr}`);
       if (data.success && data.programs) {
         setAllPrograms(data.programs);
       } else {
@@ -669,10 +787,9 @@ const VeliPanel = () => {
       const startDateStr = weekStart.toISOString().split('T')[0];
       const endDateStr = weekEnd.toISOString().split('T')[0];
 
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=${startDateStr}&endDate=${endDateStr}`
       );
-      const data = await response.json();
       
       if (data.success && data.programs) {
         let yapilan = 0;
@@ -704,20 +821,21 @@ const VeliPanel = () => {
   const fetchDersBasariStatsForStudent = async (studentId) => {
     setDersBasariLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=2099-12-31`
       );
-      const data = await response.json();
       if (data.success && data.programs) {
-        const studentArea = student?.alan || 'yks_say';
-        let studentSubjects = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
-        if (studentArea.startsWith('yks_')) {
-          if (dersBasariExamType === 'tyt') {
-            studentSubjects = studentSubjects.filter(s => s.startsWith('TYT '));
-          } else if (dersBasariExamType === 'ayt') {
-            studentSubjects = studentSubjects.filter(s => s.startsWith('AYT '));
-          }
+        // Seçili bileşene göre ders listesini al
+        const selectedComp = examComponents.find(c => c.id === dersBasariExamType);
+        let studentSubjects = [];
+        
+        if (selectedComp && selectedComp.dersler) {
+          studentSubjects = selectedComp.dersler;
+        } else if (examComponents.length > 0) {
+          // Eğer seçili bileşen yoksa ama bileşenler varsa, ilkini kullan
+          studentSubjects = examComponents[0].dersler || [];
         }
+
         const stats = {};
         const dersDetailMap = {};
         studentSubjects.forEach(subject => {
@@ -755,6 +873,15 @@ const VeliPanel = () => {
             yapilmadi: totalSoru - yapildiSoru,
             yapildiPercent
           };
+          
+          // Konu bazlı başarı yüzdesi hesapla
+          Object.keys(topicMap).forEach(k => {
+             const t = topicMap[k];
+             const totalSolved = (t.dogru || 0) + (t.yanlis || 0) + (t.bos || 0);
+             t.basariYuzdesi = totalSolved > 0 ? Math.round(((t.dogru || 0) / totalSolved) * 100) : 0;
+             t.totalSolved = totalSolved;
+          });
+          
           dersDetailMap[subject] = topicMap;
         });
         setDersBasariStats(stats);
@@ -795,8 +922,7 @@ const VeliPanel = () => {
 
   const fetchDenemeNetleri = async (studentId) => {
     try {
-      const genelResponse = await fetch(`${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${studentId}`);
-      const genelData = await genelResponse.json();
+      const genelData = await safeFetchJson(`${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${studentId}`);
       
       if (genelData.success && genelData.denemeler && genelData.denemeler.length > 0) {
         let sonDeneme = genelData.denemeler[0];
@@ -835,8 +961,7 @@ const VeliPanel = () => {
         return;
       }
       
-      const bransResponse = await fetch(`${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${studentId}`);
-      const bransData = await bransResponse.json();
+      const bransData = await safeFetchJson(`${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${studentId}`);
       
       if (bransData.success && bransData.denemeler && bransData.denemeler.length > 0) {
         const sonDeneme = bransData.denemeler[0];
@@ -1058,10 +1183,9 @@ const VeliPanel = () => {
     }
     setKonuIlerlemesiLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
       );
-      const data = await response.json();
       if (data.success && data.konular && data.konular.length > 0) {
         setKonuIlerlemesi(data.konular);
       } else {
@@ -1100,10 +1224,9 @@ const VeliPanel = () => {
     if (!student?.id) return;
     setBransDenemelerLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${student.id}`
       );
-      const data = await response.json();
       if (data.success && data.denemeler) {
         setBransDenemeList(data.denemeler);
       } else {
@@ -1125,8 +1248,17 @@ const VeliPanel = () => {
   
   const bransAggregatedByDers = useMemo(() => {
     const dersMap = {};
+    const comp = examComponents.find(c => c.id === bransExamType);
+    const componentDersler = comp ? (comp.dersler || []) : [];
+
     bransDenemeList.forEach((d) => {
       const ders = d.ders || 'Bilinmeyen';
+      
+      // Sadece seçili sınav bileşenine ait dersleri göster
+      if (componentDersler.length > 0 && !componentDersler.includes(ders)) {
+        return;
+      }
+
       if (!dersMap[ders]) {
         dersMap[ders] = {
           ders,
@@ -1167,7 +1299,7 @@ const VeliPanel = () => {
         ortBasari: agg.count ? Math.round(agg.sum / agg.count) : 0
       }))
     }));
-  }, [bransDenemeList]);
+  }, [bransDenemeList, bransExamType, examComponents]);
   
   const genelNetColor = (net, maxNet) => {
     const denom = maxNet > 0 ? maxNet : 1;
@@ -1179,7 +1311,9 @@ const VeliPanel = () => {
   
   const calculateGenelDenemeOrtalamalari = useMemo(() => {
     if (!genelDenemeList || genelDenemeList.length === 0) {
-      return { tytOrtalama: 0, aytOrtalama: 0, digerOrtalama: 0 };
+      const emptyRes = {};
+      examComponents.forEach(c => emptyRes[c.id] = 0);
+      return emptyRes;
     }
     let filteredDenemeler = [...genelDenemeList];
     if (genelDenemeFilter === 'son-3') {
@@ -1193,61 +1327,50 @@ const VeliPanel = () => {
     } else {
       filteredDenemeler = filteredDenemeler.slice(0, 1);
     }
-    let tytToplamNet = 0;
-    let tytSayisi = 0;
-    let aytToplamNet = 0;
-    let aytSayisi = 0;
-    let digerToplamNet = 0;
-    let digerSayisi = 0;
+
+    const componentStats = {};
+    examComponents.forEach(c => {
+      componentStats[c.id] = { totalNet: 0, count: 0 };
+    });
+
     filteredDenemeler.forEach((deneme) => {
-      const sinavTipi = (deneme.sinavTipi || 'tyt').toLowerCase();
+      const sinavTipi = deneme.sinavTipi;
+      if (!componentStats[sinavTipi]) return;
+
       const dersSonuclari = deneme.dersSonuclari || {};
+      const component = examComponents.find(c => c.id === sinavTipi);
+      const componentDersler = component ? (component.dersler || []) : [];
+
       let toplamNet = 0;
-      if (sinavTipi === 'tyt' || sinavTipi === 'ayt') {
-        Object.entries(dersSonuclari).forEach(([ders, data]) => {
-          let netValue = 0;
-          if (data && data.net !== undefined && data.net !== null) {
-            netValue = parseFloat(data.net) || 0;
-          }
-          if (sinavTipi === 'tyt' && ders.startsWith('TYT ')) {
-            toplamNet += netValue;
-          } else if (sinavTipi === 'ayt' && ders.startsWith('AYT ')) {
-            toplamNet += netValue;
-          }
-        });
-      } else {
-        Object.entries(dersSonuclari).forEach(([, data]) => {
+      Object.entries(dersSonuclari).forEach(([ders, data]) => {
+        if (componentDersler.includes(ders)) {
           let netValue = 0;
           if (data && data.net !== undefined && data.net !== null) {
             netValue = parseFloat(data.net) || 0;
           }
           toplamNet += netValue;
-        });
-      }
-      if (sinavTipi === 'tyt') {
-        tytToplamNet += toplamNet;
-        tytSayisi++;
-      } else if (sinavTipi === 'ayt') {
-        aytToplamNet += toplamNet;
-        aytSayisi++;
-      } else {
-        digerToplamNet += toplamNet;
-        digerSayisi++;
-      }
+        }
+      });
+
+      componentStats[sinavTipi].totalNet += toplamNet;
+      componentStats[sinavTipi].count++;
     });
-    const tytOrtalama = tytSayisi > 0 ? parseFloat((tytToplamNet / tytSayisi).toFixed(2)) : 0;
-    const aytOrtalama = aytSayisi > 0 ? parseFloat((aytToplamNet / aytSayisi).toFixed(2)) : 0;
-    const digerOrtalama = digerSayisi > 0 ? parseFloat((digerToplamNet / digerSayisi).toFixed(2)) : 0;
-    return { tytOrtalama, aytOrtalama, digerOrtalama };
-  }, [genelDenemeList, genelDenemeFilter]);
+
+    const results = {};
+    examComponents.forEach(c => {
+      const stats = componentStats[c.id];
+      results[c.id] = stats.count > 0 ? parseFloat((stats.totalNet / stats.count).toFixed(2)) : 0;
+    });
+
+    return results;
+  }, [genelDenemeList, genelDenemeFilter, examComponents]);
   
   const fetchGenelDenemeler = async () => {
     if (!student?.id) return;
     setGenelDenemeListLoading(true);
     try {
       const url = `${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${student.id}`;
-      const response = await fetch(url);
-      const data = await response.json();
+      const data = await safeFetchJson(url);
       if (data.success && data.denemeler) {
         setGenelDenemeList(data.denemeler || []);
       } else {
@@ -1337,109 +1460,58 @@ const VeliPanel = () => {
                   <p style={{fontSize: '14px', color: '#6b7280'}}>Analiz yapmak istediğiniz sınavı seçin</p>
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
-                  {(() => {
-                    const studentArea = student?.alan || '';
-                    const isYks = studentArea.startsWith('yks_');
-                    if (isYks) {
-                      return (
-                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                          <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                            <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                            YKS
-                          </h4>
-                          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                            <button
-                              onClick={() => {
-                                setSelectedQuestionExamArea('tyt');
-                                setQuestionDistributionPeriod('gunluk');
-                                fetchQuestionDistributionStatsForStudent();
-                              }}
-                              style={{
-                                padding: '14px 24px',
-                                background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                border: '2px solid #e5e7eb',
-                                borderRadius: 12,
-                                cursor: 'pointer',
-                                fontSize: '15px',
-                                fontWeight: 600,
-                                color: '#374151',
-                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                position: 'relative',
-                                overflow: 'hidden'
-                              }}
-                            >
-                              TYT
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedQuestionExamArea('ayt');
-                                setQuestionDistributionPeriod('gunluk');
-                                fetchQuestionDistributionStatsForStudent();
-                              }}
-                              style={{
-                                padding: '14px 24px',
-                                background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                border: '2px solid #e5e7eb',
-                                borderRadius: 12,
-                                cursor: 'pointer',
-                                fontSize: '15px',
-                                fontWeight: 600,
-                                color: '#374151',
-                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                position: 'relative',
-                                overflow: 'hidden'
-                              }}
-                            >
-                              AYT
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return EXAM_CATEGORY_OPTIONS.map((group) => {
-                      if (group.label === 'YKS') return null;
-                      const visibleOptions = group.options.filter((option) => !studentArea || option.value === studentArea);
-                      if (visibleOptions.length === 0) return null;
-                      return (
-                        <div key={group.label} style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                          <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                            <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                            {group.label}
-                          </h4>
-                          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                            {visibleOptions.map((option) => (
-                              <button
-                                key={option.value}
-                                onClick={() => {
-                                  setSelectedQuestionExamArea(option.value);
-                                  setQuestionDistributionPeriod('gunluk');
-                                  fetchQuestionDistributionStatsForStudent();
-                                }}
-                                style={{
-                                  padding: '14px 24px',
-                                  background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                  border: '2px solid #e5e7eb',
-                                  borderRadius: 12,
-                                  cursor: 'pointer',
-                                  fontSize: '15px',
-                                  fontWeight: 600,
-                                  color: '#374151',
-                                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                  position: 'relative',
-                                  overflow: 'hidden'
-                                }}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
+                  <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
+                    <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
+                      <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
+                      {student?.alanName || 'Sınav'}
+                    </h4>
+                    <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
+                      {examComponentsLoading ? (
+                        <div style={{color: '#6b7280', fontSize: '14px', padding: '10px'}}>Sınav bileşenleri yükleniyor...</div>
+                      ) : examComponents.length > 0 ? (
+                        examComponents.map((comp) => (
+                          <button
+                            key={comp.id}
+                            onClick={() => {
+                              setSelectedQuestionExamArea(comp.id);
+                              setQuestionDistributionPeriod('gunluk');
+                              fetchQuestionDistributionStatsForStudent();
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.borderColor = '#6a1b9a';
+                              e.currentTarget.style.color = '#6a1b9a';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(106, 27, 154, 0.1)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.borderColor = '#e5e7eb';
+                              e.currentTarget.style.color = '#374151';
+                              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                            }}
+                            style={{
+                              padding: '14px 24px',
+                              background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
+                              border: '2px solid #e5e7eb',
+                              borderRadius: 12,
+                              cursor: 'pointer',
+                              fontSize: '15px',
+                              fontWeight: 600,
+                              color: '#374151',
+                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            {comp.ad}
+                          </button>
+                        ))
+                      ) : (
+                        <div style={{color: '#ef4444', fontSize: '14px', padding: '10px'}}>Bu alan için sınav bileşeni tanımlanmamış.</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1519,9 +1591,7 @@ const VeliPanel = () => {
                         ← Geri
                       </button>
                       <h3 style={{fontSize: '22px', fontWeight: 700, color: '#1f2937', letterSpacing: '-0.5px'}}>
-                        {selectedQuestionExamArea === 'tyt' ? 'TYT Soru Dağılımı' : 
-                         selectedQuestionExamArea === 'ayt' ? 'AYT Soru Dağılımı' :
-                         EXAM_CATEGORY_OPTIONS.flatMap(g => g.options).find(o => o.value === selectedQuestionExamArea)?.label || 'Soru Dağılımı'}
+                        {examComponents.find(c => c.id === selectedQuestionExamArea)?.ad || 'Soru Dağılımı'}
                       </h3>
                     </div>
                     <div style={{display: 'flex', gap: 32, minHeight: '450px', padding: '40px 20px', position: 'relative'}}>
@@ -1544,13 +1614,41 @@ const VeliPanel = () => {
                                 const actualBarHeight = maxValue > 0 ? (stats.yapildi / maxValue) * maxBarHeight : 0;
                                 return (
                                   <div key={subject} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, maxWidth: '120px'}}>
-                                    <div style={{fontSize: 14, fontWeight: 600, color: '#111827', textAlign: 'center'}}>{subject}</div>
-                                    <div style={{position: 'relative', height: maxBarHeight, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center'}}>
-                                      <div style={{width: '40px', height: `${Math.max(actualBarHeight, 4)}px`, borderRadius: '999px 999px 0 0', background: 'linear-gradient(180deg, #6a1b9a, #8e24aa)', boxShadow: '0 8px 20px rgba(106,27,154,0.3)', position: 'relative', overflow: 'hidden'}}>
-                                        <div style={{position: 'absolute', top: -28, left: '50%', transform: 'translateX(-50%)', background: 'white', borderRadius: 999, padding: '4px 8px', fontSize: 12, fontWeight: 700, color: '#6a1b9a', boxShadow: '0 2px 6px rgba(0,0,0,0.15)'}}>
-                                          {stats.yapildi} soru
-                                        </div>
-                                      </div>
+                                    <div style={{fontSize: '18px', fontWeight: 700, color: '#1f2937', marginBottom: 12, minHeight: '24px', display: 'flex', alignItems: 'center'}}>
+                                      {stats.yapildi}
+                                    </div>
+                                    <div 
+                                      style={{
+                                        width: '100%',
+                                        height: `${actualBarHeight}px`,
+                                        minHeight: actualBarHeight > 0 ? '40px' : '0',
+                                        background: 'linear-gradient(180deg, #10b981, #059669)',
+                                        borderRadius: '8px 8px 0 0',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: 'white',
+                                        fontSize: actualBarHeight > 50 ? '14px' : '12px',
+                                        fontWeight: 700,
+                                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                                        boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.target.style.transform = 'scale(1.05)';
+                                        e.target.style.boxShadow = '0 4px 16px rgba(16, 185, 129, 0.4)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.target.style.transform = 'scale(1)';
+                                        e.target.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.3)';
+                                      }}
+                                      title={`${subject}: Yapılan ${stats.yapildi} soru`}
+                                    >
+                                      {actualBarHeight > 50 && stats.yapildi}
+                                    </div>
+                                    <div style={{fontSize: '13px', fontWeight: 600, color: '#374151', textAlign: 'center', padding: '12px 4px 0', lineHeight: '1.4', minHeight: '50px', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
+                                      {subject}
                                     </div>
                                   </div>
                                 );
@@ -1579,97 +1677,58 @@ const VeliPanel = () => {
                   <p style={{fontSize: '14px', color: '#6b7280'}}>Analiz yapmak istediğiniz sınavı seçin</p>
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
-                  {(() => {
-                    const studentArea = student?.alan || '';
-                    const isYks = studentArea.startsWith('yks_');
-                    if (isYks) {
-                      return (
-                        <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                          <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                            <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                            YKS
-                          </h4>
-                          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                            <button
-                              onClick={() => {
-                                setSelectedExamArea('tyt');
-                                setSelectedSubject(null);
-                                setTopicStats({});
-                              }}
-                              style={{
-                                padding: '14px 24px',
-                                background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                border: '2px solid #e5e7eb',
-                                borderRadius: 12,
-                                cursor: 'pointer',
-                                fontSize: '15px',
-                                fontWeight: 600,
-                                color: '#374151'
-                              }}
-                            >
-                              TYT
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedExamArea('ayt');
-                                setSelectedSubject(null);
-                                setTopicStats({});
-                              }}
-                              style={{
-                                padding: '14px 24px',
-                                background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                border: '2px solid #e5e7eb',
-                                borderRadius: 12,
-                                cursor: 'pointer',
-                                fontSize: '15px',
-                                fontWeight: 600,
-                                color: '#374151'
-                              }}
-                            >
-                              AYT
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return EXAM_CATEGORY_OPTIONS.map((group) => {
-                      if (group.label === 'YKS') return null;
-                      const visibleOptions = group.options.filter((option) => !studentArea || option.value === studentArea);
-                      if (visibleOptions.length === 0) return null;
-                      return (
-                        <div key={group.label} style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                          <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                            <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                            {group.label}
-                          </h4>
-                          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                            {visibleOptions.map((option) => (
-                              <button
-                                key={option.value}
-                                onClick={() => {
-                                  setSelectedExamArea(option.value);
-                                  setSelectedSubject(null);
-                                  setTopicStats({});
-                                }}
-                                style={{
-                                  padding: '14px 24px',
-                                  background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                  border: '2px solid #e5e7eb',
-                                  borderRadius: 12,
-                                  cursor: 'pointer',
-                                  fontSize: '15px',
-                                  fontWeight: 600,
-                                  color: '#374151'
-                                }}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
+                  {examComponentsLoading ? (
+                    <div style={{color: '#6b7280', fontSize: '14px', padding: '10px'}}>Sınav bileşenleri yükleniyor...</div>
+                  ) : examComponents.length > 0 ? (
+                    <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
+                      <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
+                        <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
+                        {student?.alanName || 'Sınav'}
+                      </h4>
+                      <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
+                        {examComponents.map((comp) => (
+                          <button
+                            key={comp.id}
+                            onClick={() => {
+                              setSelectedExamArea(comp.id);
+                              setSelectedSubject(null);
+                              setTopicStats({});
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.borderColor = '#6a1b9a';
+                              e.currentTarget.style.color = '#6a1b9a';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(106, 27, 154, 0.1)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.borderColor = '#e5e7eb';
+                              e.currentTarget.style.color = '#374151';
+                              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                            }}
+                            style={{
+                              padding: '14px 24px',
+                              background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
+                              border: '2px solid #e5e7eb',
+                              borderRadius: 12,
+                              cursor: 'pointer',
+                              fontSize: '15px',
+                              fontWeight: 600,
+                              color: '#374151',
+                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            {comp.ad}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{color: '#ef4444', fontSize: '14px', padding: '10px'}}>Bu alan için sınav bileşeni tanımlanmamış.</div>
+                  )}
                 </div>
               </div>
             ) : !selectedSubject ? (
@@ -1696,26 +1755,37 @@ const VeliPanel = () => {
                   </button>
                   <div>
                     <h3 style={{fontSize: '24px', fontWeight: 700, color: '#1f2937', marginBottom: 4}}>
-                      {selectedExamArea === 'tyt' ? 'TYT Konu Dağılımı' : 
-                       selectedExamArea === 'ayt' ? 'AYT Konu Dağılımı' :
-                       EXAM_CATEGORY_OPTIONS.flatMap(g => g.options).find(o => o.value === selectedExamArea)?.label || 'Ders Seçin'}
+                      {examComponents.find(c => c.id === selectedExamArea)?.ad || 'Konu Dağılımı'}
                     </h3>
                     <p style={{fontSize: '14px', color: '#6b7280'}}>Ders seçerek konu analizine başlayın</p>
                   </div>
                 </div>
                 <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16}}>
                   {(() => {
+                    const comp = examComponents.find(c => c.id === selectedExamArea);
+                    if (comp && comp.dersler && comp.dersler.length > 0) {
+                      return comp.dersler;
+                    }
+                    
+                    // Fallback to legacy logic if dersler is not available
                     let subjects = [];
-                    if (selectedExamArea === 'tyt') {
-                      subjects = EXAM_SUBJECTS_BY_AREA['yks_tyt'] || [];
-                    } else if (selectedExamArea === 'ayt') {
-                      const studentArea = student?.alan || '';
-                      if (studentArea && studentArea.startsWith('yks_')) {
-                        const allSubjectsArea = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
-                        subjects = allSubjectsArea.filter(s => s.startsWith('AYT '));
+                    if (comp) {
+                      const studentAreaRaw = student?.alan || '';
+                      const studentArea = (studentAreaRaw || '').toLowerCase();
+                      const isYks = studentArea.startsWith('yks');
+                      const fallbackDersList = getDersList(selectedQuestionExamArea);
+
+                      if (isYks) {
+                        if (selectedExamArea === 'tyt') {
+                          subjects = fallbackDersList.filter(d => d.startsWith('TYT ') || !d.includes('AYT '));
+                        } else if (selectedExamArea === 'ayt') {
+                          subjects = fallbackDersList.filter(d => d.startsWith('AYT '));
+                        } else {
+                          subjects = fallbackDersList;
+                        }
+                      } else {
+                        subjects = fallbackDersList;
                       }
-                    } else {
-                      subjects = EXAM_SUBJECTS_BY_AREA[selectedExamArea] || [];
                     }
                     return subjects;
                   })().map((subject) => {
@@ -1783,9 +1853,9 @@ const VeliPanel = () => {
                 ) : (
                   <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                     {Object.entries(topicStats)
-                      .sort((a, b) => (b[1].total || 0) - (a[1].total || 0))
+                      .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                       .map(([konu, stats]) => {
-                        const topicPercent = stats.total > 0 ? Math.round((stats.yapildi / stats.total) * 100) : 0;
+                        const topicPercent = stats.basariYuzdesi || 0;
                         const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
                         return (
                           <div key={konu} style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb'}}>
@@ -1797,8 +1867,13 @@ const VeliPanel = () => {
                               <div style={{width: `${topicPercent}%`, height: '100%', background: topicColor, transition: 'width 0.3s ease'}} />
                             </div>
                             <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#6b7280'}}>
-                              <span>Çözülen: <strong style={{color: '#10b981'}}>{stats.yapildi}</strong></span>
+                              <span>Çözülen: <strong style={{color: '#10b981'}}>{stats.totalSolved}</strong></span>
                               <span>Verilen: <strong style={{color: '#1f2937'}}>{stats.total}</strong></span>
+                            </div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#6b7280', marginTop: 8}}>
+                              <span>Doğru: <strong style={{color: '#065f46'}}>{stats.dogru || 0}</strong></span>
+                              <span>Yanlış: <strong style={{color: '#b91c1c'}}>{stats.yanlis || 0}</strong></span>
+                              <span>Boş: <strong style={{color: '#374151'}}>{stats.bos || 0}</strong></span>
                             </div>
                           </div>
                         );
@@ -1912,40 +1987,39 @@ const VeliPanel = () => {
             <h2 style={{fontSize: '28px', fontWeight: 700, color: '#1f2937', letterSpacing: '-0.5px', margin: 0}}>
               Ders/Konu Bazlı Başarım
             </h2>
-            {student?.alan?.startsWith('yks_') && (
+            {examComponents.length > 1 && (
               <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                <button 
-                  onClick={() => setDersBasariExamType('tyt')}
-                  style={{
-                    padding: '10px 20px',
-                    borderRadius: 8,
-                    border: 'none',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    background: dersBasariExamType === 'tyt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                    color: dersBasariExamType === 'tyt' ? 'white' : '#6b7280'
-                  }}
-                >
-                  TYT
-                </button>
-                <button 
-                  onClick={() => setDersBasariExamType('ayt')}
-                  style={{
-                    padding: '10px 20px',
-                    borderRadius: 8,
-                    border: 'none',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    background: dersBasariExamType === 'ayt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                    color: dersBasariExamType === 'ayt' ? 'white' : '#6b7280'
-                  }}
-                >
-                  AYT
-                </button>
+                {examComponents.map((comp) => (
+                  <button 
+                    key={comp.id}
+                    onClick={() => setDersBasariExamType(comp.id)}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      background: dersBasariExamType === comp.id ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
+                      color: dersBasariExamType === comp.id ? 'white' : '#6b7280'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (dersBasariExamType !== comp.id) {
+                        e.target.style.background = '#f3f4f6';
+                        e.target.style.color = '#374151';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (dersBasariExamType !== comp.id) {
+                        e.target.style.background = 'transparent';
+                        e.target.style.color = '#6b7280';
+                      }
+                    }}
+                  >
+                    {comp.ad}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -2075,15 +2149,18 @@ const VeliPanel = () => {
               {dersDetailTopics[selectedDersForDetail] && Object.keys(dersDetailTopics[selectedDersForDetail]).length > 0 ? (
                 <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
                   {Object.entries(dersDetailTopics[selectedDersForDetail])
-                    .sort((a, b) => (b[1].total || 0) - (a[1].total || 0))
+                    .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                     .map(([konu, topicStats]) => {
-                      const topicPercent = topicStats.total > 0 ? Math.round((topicStats.yapildi / topicStats.total) * 100) : 0;
+                      const topicPercent = topicStats.basariYuzdesi || 0;
                       const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
                       return (
                         <div key={konu} style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb'}}>
                           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12}}>
                             <h4 style={{fontSize: '16px', fontWeight: 700, color: '#1f2937', margin: 0}}>{konu}</h4>
-                            <span style={{fontSize: '18px', fontWeight: 700, color: topicColor}}>%{topicPercent}</span>
+                            <div style={{textAlign: 'right'}}>
+                              <span style={{fontSize: '18px', fontWeight: 700, color: topicColor}}>%{topicPercent}</span>
+                              <div style={{fontSize: '11px', color: '#6b7280'}}>Başarı</div>
+                            </div>
                           </div>
                           <div style={{width: '100%', height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', marginBottom: 12}}>
                             <div style={{width: `${topicPercent}%`, height: '100%', background: topicColor, transition: 'width 0.3s ease'}} />
@@ -2123,48 +2200,43 @@ const VeliPanel = () => {
             Konu İlerlemesi
           </h2>
           
-          {student?.alan?.startsWith('yks_') && (
+          {examComponents.length > 1 && (
             <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-              <button
-                onClick={() => {
-                  setIlerlemeExamType('tyt');
-                  setSelectedDersForIlerleme(null);
-                  setKonuIlerlemesi([]);
-                }}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  background: ilerlemeExamType === 'tyt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                  color: ilerlemeExamType === 'tyt' ? 'white' : '#6b7280'
-                }}
-              >
-                TYT
-              </button>
-              <button
-                onClick={() => {
-                  setIlerlemeExamType('ayt');
-                  setSelectedDersForIlerleme(null);
-                  setKonuIlerlemesi([]);
-                }}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  background: ilerlemeExamType === 'ayt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                  color: ilerlemeExamType === 'ayt' ? 'white' : '#6b7280'
-                }}
-              >
-                AYT
-              </button>
+              {examComponents.map((comp) => (
+                <button 
+                  key={comp.id}
+                  onClick={() => {
+                    setIlerlemeExamType(comp.id);
+                    setSelectedDersForIlerleme(null);
+                    setKonuIlerlemesi([]);
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    border: 'none',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    background: ilerlemeExamType === comp.id ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
+                    color: ilerlemeExamType === comp.id ? 'white' : '#6b7280'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (ilerlemeExamType !== comp.id) {
+                      e.target.style.background = '#f3f4f6';
+                      e.target.style.color = '#374151';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (ilerlemeExamType !== comp.id) {
+                      e.target.style.background = 'transparent';
+                      e.target.style.color = '#6b7280';
+                    }
+                  }}
+                >
+                  {comp.ad}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -2180,12 +2252,66 @@ const VeliPanel = () => {
               gap: 16
             }}>
               {student && (() => {
-                const studentArea = student.alan || 'yks_say';
-                let studentSubjects = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
+                const comp = examComponents.find(c => c.id === ilerlemeExamType);
+                if (comp && comp.dersler && comp.dersler.length > 0) {
+                  return comp.dersler.map((ders) => {
+                    const iconSrc = getSubjectIcon(ders);
+                    return (
+                      <div
+                        key={ders}
+                        onClick={() => setSelectedDersForIlerleme(ders)}
+                        style={{
+                          background: 'white',
+                          borderRadius: 12,
+                          padding: 20,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          border: '2px solid transparent'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                          e.currentTarget.style.borderColor = '#6a1b9a';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                          e.currentTarget.style.borderColor = 'transparent';
+                        }}
+                      >
+                        {iconSrc && (
+                          <img
+                            src={iconSrc}
+                            alt={ders}
+                            style={{
+                              width: 40,
+                              height: 40,
+                              objectFit: 'contain',
+                              borderRadius: 8
+                            }}
+                          />
+                        )}
+                        <span style={{fontSize: '16px', fontWeight: 600, color: '#1f2937'}}>
+                          {ders}
+                        </span>
+                      </div>
+                    );
+                  });
+                }
                 
-                if (studentArea.startsWith('yks_')) {
+                // Fallback to legacy logic
+                const studentAreaRaw = student?.alan || '';
+                const studentArea = (studentAreaRaw || '').toLowerCase();
+                const isYks = studentArea.startsWith('yks');
+                let studentSubjects = getDersList(selectedExamArea);
+                
+                if (isYks) {
                   if (ilerlemeExamType === 'tyt') {
-                    studentSubjects = studentSubjects.filter(s => s.startsWith('TYT '));
+                    studentSubjects = studentSubjects.filter(s => s.startsWith('TYT ') || !s.includes('AYT '));
                   } else if (ilerlemeExamType === 'ayt') {
                     studentSubjects = studentSubjects.filter(s => s.startsWith('AYT '));
                   }
@@ -2432,6 +2558,43 @@ const VeliPanel = () => {
             <h2 style={{fontSize: 28, fontWeight: 700, margin: 0, color: '#111827'}}>Branş Denemeleri</h2>
             <p style={{margin: '6px 0 0', color: '#6b7280'}}>Branş denemesi grafikleri</p>
           </div>
+          
+          {/* Sınav Bileşeni Sekmeleri - Dinamik */}
+          {examComponents.length > 1 && (
+            <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
+              {examComponents.map((comp) => (
+                <button 
+                  key={comp.id}
+                  onClick={() => setBransExamType(comp.id)}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    border: 'none',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    background: bransExamType === comp.id ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
+                    color: bransExamType === comp.id ? 'white' : '#6b7280'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (bransExamType !== comp.id) {
+                      e.target.style.background = '#f3f4f6';
+                      e.target.style.color = '#374151';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (bransExamType !== comp.id) {
+                      e.target.style.background = 'transparent';
+                      e.target.style.color = '#6b7280';
+                    }
+                  }}
+                >
+                  {comp.ad}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
           {bransDenemelerLoading ? (
@@ -2554,41 +2717,32 @@ const VeliPanel = () => {
         </div>
 
         {(() => {
-          const studentAreaRaw = student?.alan || '';
-          const studentArea = (studentAreaRaw || '').toLowerCase();
-          const isYks = studentArea.startsWith('yks');
-          if (isYks) {
-            return (
-              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32}}>
-                <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
-                  <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>TYT Deneme Ortalaması</div>
-                  <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
-                    {calculateGenelDenemeOrtalamalari.tytOrtalama}
-                  </div>
-                  <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                </div>
-                <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
-                  <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>AYT Deneme Ortalaması</div>
-                  <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
-                    {calculateGenelDenemeOrtalamalari.aytOrtalama}
-                  </div>
-                  <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                </div>
-              </div>
-            );
-          } else {
-            return (
-              <div style={{display: 'grid', gridTemplateColumns: '1fr', gap: 24, marginBottom: 32, maxWidth: 600}}>
-                <div style={{background: 'white', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
+          return (
+            <div style={{
+              display: 'grid', 
+              gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`, 
+              gap: 24, 
+              marginBottom: 32
+            }}>
+              {examComponents.map((comp) => (
+                <div key={comp.id} style={{
+                  background: 'white',
+                  borderRadius: 16,
+                  padding: 32,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  border: '1px solid #e5e7eb'
+                }}>
                   <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>
-                    {studentArea === 'lgs' ? 'LGS' : formatAreaLabel(studentAreaRaw)} Deneme Ortalaması
+                    {comp.ad} Deneme Ortalaması
                   </div>
-                  <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.digerOrtalama}</div>
+                  <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
+                    {calculateGenelDenemeOrtalamalari[comp.id] || 0}
+                  </div>
                   <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
                 </div>
-              </div>
-            );
-          }
+              ))}
+            </div>
+          );
         })()}
 
         <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20}}>
@@ -2796,17 +2950,21 @@ const VeliPanel = () => {
             {denemeGrafikTab === 'ders-bazli' && (
               <>
                 {(() => {
-                  const studentAreaRaw = student?.alan || '';
-                  const studentArea = (studentAreaRaw || '').toLowerCase();
-                  const isYks = studentArea.startsWith('yks');
+                  const comp = examComponents.find(c => c.id === dersBazliGrafikSinavTipi);
                   let dersList = [];
-                  if (isYks) {
-                    const sinavTipi = dersBazliGrafikSinavTipi;
-                    dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw]?.filter(ders => 
-                      sinavTipi === 'tyt' ? ders.startsWith('TYT ') : ders.startsWith('AYT ')
-                    ) || [];
+                  if (comp && comp.dersler && comp.dersler.length > 0) {
+                    dersList = comp.dersler;
                   } else {
-                    dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw] || [];
+                    // Fallback to legacy logic
+                    const studentAreaRaw = student?.alan || '';
+                    const studentArea = (studentAreaRaw || '').toLowerCase();
+                    const isYks = studentArea.startsWith('yks');
+                    if (isYks) {
+                      const sinavTipi = dersBazliGrafikSinavTipi;
+                      dersList = getDersList(dersBazliGrafikSinavTipi);
+                    } else {
+                      dersList = getDersList(dersBazliGrafikSinavTipi);
+                    }
                   }
                   let filteredDenemeler = [...genelDenemeList];
                   if (genelDenemeFilter === 'son-3') {
@@ -2828,36 +2986,25 @@ const VeliPanel = () => {
                   }
                   return (
                     <div>
-                      {isYks && (
+                      {examComponents.length > 1 && (
                         <div style={{marginBottom: 24, display: 'flex', gap: 12}}>
-                          <button
-                            onClick={() => setDersBazliGrafikSinavTipi('tyt')}
-                            style={{
-                              padding: '10px 20px',
-                              borderRadius: 8,
-                              border: '1px solid #d1d5db',
-                              background: dersBazliGrafikSinavTipi === 'tyt' ? '#6a1b9a' : 'white',
-                              color: dersBazliGrafikSinavTipi === 'tyt' ? 'white' : '#374151',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                          >
-                            TYT
-                          </button>
-                          <button
-                            onClick={() => setDersBazliGrafikSinavTipi('ayt')}
-                            style={{
-                              padding: '10px 20px',
-                              borderRadius: 8,
-                              border: '1px solid #d1d5db',
-                              background: dersBazliGrafikSinavTipi === 'ayt' ? '#6a1b9a' : 'white',
-                              color: dersBazliGrafikSinavTipi === 'ayt' ? 'white' : '#374151',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                          >
-                            AYT
-                          </button>
+                          {examComponents.map((comp) => (
+                            <button
+                              key={comp.id}
+                              onClick={() => setDersBazliGrafikSinavTipi(comp.id)}
+                              style={{
+                                padding: '10px 20px',
+                                borderRadius: 8,
+                                border: '1px solid #d1d5db',
+                                background: dersBazliGrafikSinavTipi === comp.id ? '#6a1b9a' : 'white',
+                                color: dersBazliGrafikSinavTipi === comp.id ? 'white' : '#374151',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                              }}
+                            >
+                              {comp.ad}
+                            </button>
+                          ))}
                         </div>
                       )}
                       <div style={{marginBottom: 24, display: 'flex', gap: 12, flexWrap: 'wrap'}}>
@@ -3299,6 +3446,7 @@ const VeliPanel = () => {
             <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Yeni Şifre (opsiyonel)</label>
             <input
               type="password"
+              autoComplete="new-password"
               value={parentForm.newPassword}
               onChange={(e) => setParentForm(f => ({ ...f, newPassword: e.target.value }))}
               style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
@@ -3308,6 +3456,7 @@ const VeliPanel = () => {
             <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Yeni Şifre Tekrarı</label>
             <input
               type="password"
+              autoComplete="new-password"
               value={parentForm.newPasswordConfirm}
               onChange={(e) => setParentForm(f => ({ ...f, newPasswordConfirm: e.target.value }))}
               style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
@@ -3349,12 +3498,11 @@ const VeliPanel = () => {
                 if (parentForm.newPassword) {
                   payload.password = parentForm.newPassword;
                 }
-                const res = await fetch(`${API_BASE}/php-backend/api/update_parent.php`, {
+                const data = await safeFetchJson(`${API_BASE}/php-backend/api/update_parent.php`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(payload)
                 });
-                const data = await res.json();
                 if (data.success) {
                   const updatedParent = {
                     ...parent,
@@ -3445,6 +3593,11 @@ const VeliPanel = () => {
       <div className="main-content">
         <div className="content-area">
           {activeMenu === 'ana-sayfa' && renderAnaSayfa()}
+          {activeMenu === 'bildirimler' && (
+            <div style={{ padding: '32px' }}>
+               <Bildirimler userRole="parent" filter="parent" />
+            </div>
+          )}
           {activeMenu === 'plan-program' && renderPlanProgram()}
           {activeMenu === 'gunluk-soru' && renderGunlukSoru()}
           {activeMenu === 'ders-basari' && renderDersBasari()}

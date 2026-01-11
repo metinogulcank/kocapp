@@ -81,7 +81,7 @@ RewriteRule ^ - [L]
 
 # API istekleri için backend'e yönlendirme
 RewriteCond %{REQUEST_URI} ^/api/(.*)$
-RewriteRule ^api/(.*)$ https://api.vedatdaglarmuhendislik.com.tr:5000/api/$1 [P,L]
+RewriteRule ^api/(.*)$ https://api.kocapp.com:5000/api/$1 [P,L]
 
 # Tüm diğer istekleri index.html'e yönlendir (React Router)
 RewriteRule ^ index.html [L]

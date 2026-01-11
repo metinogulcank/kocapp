@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: KoçApp PHP backend için OpenAPI tanımı
 servers:
-  - url: https://vedatdaglarmuhendislik.com.tr/php-backend/api
+  - url: https://kocapp.com/php-backend/api
     description: Production
 paths:
   /login.php:

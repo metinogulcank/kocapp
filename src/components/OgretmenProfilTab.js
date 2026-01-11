@@ -1,13 +1,30 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
 
-const API_GET = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_teacher_profile.php";
-const API_UPDATE = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_teacher_profile.php";
-const API_PHOTO = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/upload_teacher_photo.php";
-const API_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/create_student.php";
-const API_UPDATE_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/update_student.php";
-const API_DELETE_STUDENT = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/delete_student.php";
-const API_GET_STUDENTS = "https://vedatdaglarmuhendislik.com.tr/php-backend/api/get_teacher_students.php";
+const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
+const API_GET = `${API_BASE}/php-backend/api/get_teacher_profile.php`;
+const API_UPDATE = `${API_BASE}/php-backend/api/update_teacher_profile.php`;
+const API_PHOTO = `${API_BASE}/php-backend/api/upload_teacher_photo.php`;
+const API_STUDENT = `${API_BASE}/php-backend/api/create_student.php`;
+const API_UPDATE_STUDENT = `${API_BASE}/php-backend/api/update_student.php`;
+const API_DELETE_STUDENT = `${API_BASE}/php-backend/api/delete_student.php`;
+const API_GET_STUDENTS = `${API_BASE}/php-backend/api/get_teacher_students.php`;
+
+const safeFetchJson = async (url, options = {}) => {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError, "URL:", url, "Raw response:", text);
+      return { success: false, message: "Geçersiz JSON yanıtı", raw: text };
+    }
+  } catch (fetchError) {
+    console.error("Fetch error:", fetchError, "URL:", url);
+    return { success: false, message: "İstek hatası" };
+  }
+};
 
 // Türkçe doğru title-case için
 function turkishTitle(str = '') {
@@ -17,9 +34,19 @@ function turkishTitle(str = '') {
     .join(' ');
 }
 
+// Alan kodunu okunur etikete çevir
+const formatAreaLabel = (area, studentInfo = null) => {
+  if (studentInfo && studentInfo.alanName) return studentInfo.alanName;
+  if (studentInfo && studentInfo.alan && studentInfo.alan.includes(' - ')) return studentInfo.alan;
+  if (!area) return '';
+  const allOptions = EXAM_CATEGORY_OPTIONS.flatMap(group => group.options || []);
+  const found = allOptions.find(opt => opt.value === area);
+  return found ? found.label : area;
+};
+
 export default function OgretmenProfilTab() {
   const [form, setForm] = useState({
-    _id: '', firstName: '', lastName: '', email: '', phone: '', branch: '', profilePhoto: '',
+    _id: '', firstName: '', lastName: '', email: '', phone: '', branch: '', yok_atlas_link: '', profilePhoto: '',
     newPassword: '', newPasswordConfirm: '',
     limit: 10, active: 7
   });
@@ -57,6 +84,18 @@ export default function OgretmenProfilTab() {
   const [addError, setAddError] = useState('');
   const [addSuccess, setAddSuccess] = useState('');
   const [stuUploading, setStuUploading] = useState(false);
+  const [availableExams, setAvailableExams] = useState([]);
+
+  // Sınav listesini çek
+  useEffect(() => {
+    const fetchExams = async () => {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_exams_with_components.php`);
+      if (data.success) {
+        setAvailableExams(data.exams || []);
+      }
+    };
+    fetchExams();
+  }, []);
 
   // Öğrenci listesi için state
   const [showStudentListModal, setShowStudentListModal] = useState(false);
@@ -90,10 +129,9 @@ export default function OgretmenProfilTab() {
       setLoading(false);
       return;
     }
-    fetch(`${API_GET}?id=${user.id}`)
-      .then(r => r.json())
+    safeFetchJson(`${API_GET}?id=${user.id}`)
       .then(data => {
-        if (!data._id) throw new Error('Veri alınamadı');
+        if (!data.success && !data._id) throw new Error(data.message || 'Veri alınamadı');
         setForm(f => ({ ...f, ...data, newPassword: '', newPasswordConfirm: '' }));
         setLoading(false);
       })
@@ -118,9 +156,8 @@ export default function OgretmenProfilTab() {
     formData.append('photo', file);
     formData.append('_id', user && user.id ? user.id : (form._id || 'test-id'));
     try {
-      const res = await fetch(API_PHOTO, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.message || 'Fotoğraf yüklenemedi');
+      const data = await safeFetchJson(API_PHOTO, { method: 'POST', body: formData });
+      if (!data.success || !data.url) throw new Error(data.message || 'Fotoğraf yüklenemedi');
       setForm(f => ({ ...f, profilePhoto: data.url }));
       setUploadSuccess(true);
     } catch (err) {
@@ -147,9 +184,8 @@ export default function OgretmenProfilTab() {
     formData.append('_id', 'temp_' + Date.now());
     formData.append('type', 'student'); // Öğrenci fotoğrafı olduğunu belirt
     try {
-      const res = await fetch(API_PHOTO, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.message || 'Yükleme hatası!');
+      const data = await safeFetchJson(API_PHOTO, { method: 'POST', body: formData });
+      if (!data.success || !data.url) throw new Error(data.message || 'Yükleme hatası!');
       setStudentForm(f => ({ ...f, profilePhoto: data.url }));
       setAddSuccess('Fotoğraf yüklendi!');
     } catch (err) {
@@ -177,13 +213,12 @@ export default function OgretmenProfilTab() {
       teacherId: user.id
     };
     try {
-      const res = await fetch(API_STUDENT, {
+      const data = await safeFetchJson(API_STUDENT, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'İşlem başarısız');
+      if (!data.success) throw new Error(data.message || 'İşlem başarısız');
       setAddSuccess('Öğrenci kaydedildi!');
       setStudentForm({
         alan: '',
@@ -213,8 +248,7 @@ export default function OgretmenProfilTab() {
     const user = JSON.parse(localStorage.getItem('user'));
     if (!user || !user.id) return;
     setStudentsLoading(true);
-    fetch(`${API_GET_STUDENTS}?teacherId=${user.id}`)
-      .then(r => r.json())
+    safeFetchJson(`${API_GET_STUDENTS}?teacherId=${user.id}`)
       .then(data => {
         if (data.students) {
           setStudents(data.students);
@@ -269,9 +303,8 @@ export default function OgretmenProfilTab() {
     formData.append('_id', editingStudent.id);
     formData.append('type', 'student');
     try {
-      const res = await fetch(API_PHOTO, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.message || 'Yükleme hatası!');
+      const data = await safeFetchJson(API_PHOTO, { method: 'POST', body: formData });
+      if (!data.success || !data.url) throw new Error(data.message || 'Yükleme hatası!');
       setEditStudentForm(f => ({ ...f, profilePhoto: data.url }));
       setUpdateSuccess('Fotoğraf yüklendi!');
     } catch (err) {
@@ -311,13 +344,12 @@ export default function OgretmenProfilTab() {
       payload.password = editStudentForm.password;
     }
     try {
-      const res = await fetch(API_UPDATE_STUDENT, {
+      const data = await safeFetchJson(API_UPDATE_STUDENT, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'İşlem başarısız');
+      if (!data.success) throw new Error(data.message || 'İşlem başarısız');
       setUpdateSuccess('Öğrenci güncellendi!');
       setTimeout(() => {
         setShowEditStudentModal(false);
@@ -338,13 +370,12 @@ export default function OgretmenProfilTab() {
     const user = JSON.parse(localStorage.getItem('user'));
     setDeletingStudentId(studentId);
     try {
-      const res = await fetch(API_DELETE_STUDENT, {
+      const data = await safeFetchJson(API_DELETE_STUDENT, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: studentId, teacherId: user.id })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Silme işlemi başarısız');
+      if (!data.success) throw new Error(data.message || 'Silme işlemi başarısız');
       fetchStudents();
     } catch (err) {
       alert('Silme hatası: ' + err.message);
@@ -363,13 +394,12 @@ export default function OgretmenProfilTab() {
     }
     setSaving(true);
     try {
-      const res = await fetch(API_UPDATE, {
+      const data = await safeFetchJson(API_UPDATE, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Hata oluştu');
+      if (!data.success) throw new Error(data.message || 'Hata oluştu');
       setSuccess('Profil başarıyla güncellendi');
       setModal(false);
     } catch (err) {
@@ -394,6 +424,13 @@ export default function OgretmenProfilTab() {
         <div className="pp-main">
           <div className="pp-name">{turkishTitle(`${form.firstName} ${form.lastName}`)}</div>
           <div className="pp-meta">Branş: <b>{form.branch}</b></div>
+          {form.yok_atlas_link && (
+            <div className="pp-meta" style={{marginTop: 4}}>
+              <a href={form.yok_atlas_link} target="_blank" rel="noopener noreferrer" style={{color: '#3b82f6', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4}}>
+                <span style={{fontSize: 14}}>🌐</span> Yök Atlas Profili
+              </a>
+            </div>
+          )}
         </div>
         <div className="pp-actions">
           <button className="edit-btn" onClick={() => setModal(true)}>Profili Düzenle</button>
@@ -448,14 +485,20 @@ export default function OgretmenProfilTab() {
                 <div><label>Alan</label>
                   <select name="alan" value={studentForm.alan} onChange={handleStudentFormChange} required>
                     <option value="">Seçiniz</option>
-                    {EXAM_CATEGORY_OPTIONS.map((group) => (
-                      <optgroup key={group.label} label={`SINAVLAR · ${group.label}`}>
-                        {group.options.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </optgroup>
+                    {availableExams.map((exam) => (
+                      <React.Fragment key={exam.id}>
+                        {exam.components && exam.components.length > 0 ? (
+                          <optgroup label={exam.ad}>
+                            {exam.components.map((comp) => (
+                              <option key={comp.id} value={`comp_${comp.id}`}>
+                                {exam.ad} - {comp.ad}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : (
+                          <option value={`exam_${exam.id}`}>{exam.ad}</option>
+                        )}
+                      </React.Fragment>
                     ))}
                   </select>
                 </div>
@@ -545,6 +588,12 @@ export default function OgretmenProfilTab() {
                 {form.profilePhoto && <div style={{marginTop:6}}><img src={form.profilePhoto} alt="" style={{ maxWidth: 64, borderRadius: 8 }} /></div>}
               </div>
               <div className="form-row">
+                <div style={{flex: 1}}>
+                  <label>Yök Atlas Linki</label>
+                  <input name="yok_atlas_link" value={form.yok_atlas_link || ''} onChange={handleChange} placeholder="https://yokatlas.yok.gov.tr/..." style={{width: '100%'}} />
+                </div>
+              </div>
+              <div className="form-row">
                 <div>
                   <label>Yeni Şifre</label>
                   <input name="newPassword" value={form.newPassword} onChange={handleChange} type="password" autoComplete="new-password" />
@@ -600,7 +649,7 @@ export default function OgretmenProfilTab() {
                       <div style={{flex: 1}}>
                         <div style={{fontWeight: 600, fontSize: 16}}>{student.firstName} {student.lastName}</div>
                         <div style={{fontSize: 14, color: '#6b7280', marginTop: 4}}>
-                          {student.email} • {student.className} • {student.alan}
+                          {student.email} • {student.className} • {formatAreaLabel(student.alan, student)}
                         </div>
                       </div>
                     </div>
@@ -657,14 +706,20 @@ export default function OgretmenProfilTab() {
                 <div><label>Alan</label>
                   <select name="alan" value={editStudentForm.alan} onChange={handleEditStudentFormChange} required>
                     <option value="">Seçiniz</option>
-                    {EXAM_CATEGORY_OPTIONS.map((group) => (
-                      <optgroup key={group.label} label={`SINAVLAR · ${group.label}`}>
-                        {group.options.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </optgroup>
+                    {availableExams.map((exam) => (
+                      <React.Fragment key={exam.id}>
+                        {exam.components && exam.components.length > 0 ? (
+                          <optgroup label={exam.ad}>
+                            {exam.components.map((comp) => (
+                              <option key={comp.id} value={`comp_${comp.id}`}>
+                                {exam.ad} - {comp.ad}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : (
+                          <option value={`exam_${exam.id}`}>{exam.ad}</option>
+                        )}
+                      </React.Fragment>
                     ))}
                   </select>
                 </div>
@@ -745,5 +800,4 @@ export default function OgretmenProfilTab() {
     </div>
   );
 }
-
 

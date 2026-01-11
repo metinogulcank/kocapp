@@ -8,14 +8,14 @@ const Login = () => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'https://vedatdaglarmuhendislik.com.tr';
+  const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/login.php`, {
+      const res = await fetch(`${API_BASE}/php-backend/api/login.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: username, password }),
@@ -72,6 +72,7 @@ const Login = () => {
             <input
               type="password"
               id="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="123"

@@ -15,15 +15,18 @@ import {
   faCheck,
   faTrash,
   faChevronLeft,
+  faChevronRight,
   faChartLine,
   faLightbulb,
   faStickyNote,
-  faUser
+  faUser,
+  faBell
 } from '@fortawesome/free-solid-svg-icons';
 import './OgretmenPanel.css';
 import OgrenciProgramTab from './OgrenciProgramTab';
+import Bildirimler from './Bildirimler';
 import Kaynaklar from './Kaynaklar';
-import { EXAM_CATEGORY_OPTIONS, EXAM_SUBJECTS_BY_AREA } from '../constants/examSubjects';
+import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
 // Ders görselleri
 import cografyaImg from '../assets/cografya.png';
 import edebiyatImg from '../assets/edebiyat.png';
@@ -41,12 +44,37 @@ import tumKimyaImg from '../assets/tum_kimya.png';
 import tumMatematikImg from '../assets/tum_matematik.png';
 import tumTurkceImg from '../assets/tum_turkce.png';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'https://vedatdaglarmuhendislik.com.tr';
+const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
 const API_UPDATE_STUDENT = `${API_BASE}/php-backend/api/update_student.php`;
 const API_UPLOAD_PHOTO = `${API_BASE}/php-backend/api/upload_teacher_photo.php`;
 
+const resolveIconUrl = (iconUrl) => {
+  if (!iconUrl) return null;
+  if (/^https?:\/\//i.test(iconUrl)) return iconUrl;
+  if (iconUrl.startsWith('/')) return `${API_BASE}${iconUrl}`;
+  return `${API_BASE}/${iconUrl}`;
+};
+
+const safeFetchJson = async (url, options = {}) => {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError, "URL:", url, "Raw response:", text);
+      return { success: false, message: "Geçersiz JSON yanıtı", raw: text };
+    }
+  } catch (fetchError) {
+    console.error("Fetch error:", fetchError, "URL:", url);
+    return { success: false, message: "İstek hatası" };
+  }
+};
+
 // Alan kodunu (yks_say vb.) okunur etikete çevir
-const formatAreaLabel = (area) => {
+const formatAreaLabel = (area, studentInfo = null) => {
+  if (studentInfo && studentInfo.alanName) return studentInfo.alanName;
+  if (studentInfo && studentInfo.alan && studentInfo.alan.includes(' - ')) return studentInfo.alan;
   if (!area) return '';
   const allOptions = EXAM_CATEGORY_OPTIONS.flatMap(group => group.options || []);
   const found = allOptions.find(opt => opt.value === area);
@@ -71,7 +99,38 @@ const MOTIVATION_MESSAGES = [
   "Başarı yolculuğunda sen çok güçlüsün! 🚀"
 ];
 
-const getSubjectIcon = (ders) => {
+const getSubjectIcon = (ders, allSubjects = []) => {
+  // 1. Önce veritabanından gelen dinamik ikonlara bak
+  if (allSubjects && allSubjects.length > 0) {
+    // Ders adını normalize et (Boşlukları ve büyük/küçük harfi eşitle)
+    const normalizedDers = ders.trim().toLowerCase();
+    
+    // Tam eşleşme ara
+    let found = allSubjects.find(s => s.ders_adi.trim().toLowerCase() === normalizedDers);
+    
+    // Tam eşleşme yoksa, TYT/AYT gibi önekleri kaldırıp ara
+    if (!found) {
+      const searchWithoutPrefix = normalizedDers.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+      found = allSubjects.find(s => {
+        const sNorm = s.ders_adi.trim().toLowerCase();
+        const sWithoutPrefix = sNorm.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+        return sWithoutPrefix === searchWithoutPrefix;
+      });
+    }
+
+    if (found && found.icon_url) {
+      // Eğer icon_url tam URL değilse API_BASE ekle
+      if (found.icon_url.startsWith('http')) {
+        return found.icon_url;
+      } else {
+        // Başında slash yoksa ekle
+        const path = found.icon_url.startsWith('/') ? found.icon_url : '/' + found.icon_url;
+        return `${API_BASE}${path}`;
+      }
+    }
+  }
+
+  // 2. Veritabanında yoksa statik map'ten devam et (Fallback)
   const iconMap = {
     'TYT Matematik': tumMatematikImg,
     'TYT Geometri': tumGeometriImg,
@@ -101,10 +160,13 @@ const getSubjectIcon = (ders) => {
   return iconMap[ders] || null;
 };
 
+
+
 const OgrenciPanel = () => {
   const navigate = useNavigate();
   const [activeMenu, setActiveMenu] = useState('ana-sayfa');
   const [student, setStudent] = useState(null);
+  const [allSubjects, setAllSubjects] = useState([]); // Tüm derslerin listesi (ikonlar için)
   const [loading, setLoading] = useState(true);
   const [motivationMessage, setMotivationMessage] = useState('');
   const [examCountdown, setExamCountdown] = useState({ days: 0, examName: '' });
@@ -232,8 +294,125 @@ const OgrenciPanel = () => {
     { id: 'konu-ilerlemesi', icon: faClipboardList, label: 'Kaynak ve Konu İlerlemesi' },
     { id: 'brans-denemeleri', icon: faBullseye, label: 'Branş Denemeleri' },
     { id: 'genel-denemeler', icon: faClock, label: 'Genel Denemeler' },
+    { id: 'bildirimler', icon: faBell, label: 'Bildirimlerim' },
     { id: 'profil', icon: faUser, label: 'Profilim' }
   ];
+
+  const [examComponents, setExamComponents] = useState([]);
+  const [examComponentsLoading, setExamComponentsLoading] = useState(false);
+
+  const [unreadNotifications, setUnreadNotifications] = useState([]);
+  const [unreadNotificationsLoading, setUnreadNotificationsLoading] = useState(false);
+
+  const fetchUnreadNotifications = async () => {
+    if (!student?.id) return;
+    try {
+      setUnreadNotificationsLoading(true);
+      const url = `${API_BASE}/php-backend/api/get_notifications.php?userId=${student.id}&role=student`;
+      const data = await safeFetchJson(url);
+      if (data && data.success && Array.isArray(data.notifications)) {
+        const unread = data.notifications.filter(n => n.is_read == 0 || n.is_read === false || n.is_read === 'false');
+        setUnreadNotifications(unread);
+      }
+    } catch (error) {
+      console.error('Bildirimler yüklenemedi:', error);
+    } finally {
+      setUnreadNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (student?.id) {
+      fetchUnreadNotifications();
+    }
+  }, [student?.id]);
+
+  // Dinamik ders listesi alma yardımcı fonksiyonu
+  const getDersList = (examCompId, fallbackArea) => {
+    const selectedComp = examComponents.find(c => c.id === examCompId);
+    if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
+      return selectedComp.dersler
+        .map(d => (typeof d === 'string' ? d : (d?.ders_adi || d?.ad || d?.name || '')))
+        .filter(Boolean);
+    }
+
+    const studentAreaRaw = fallbackArea || student?.alan || '';
+    const studentArea = (studentAreaRaw || '').toLowerCase();
+    const fallbackDersList = [];
+    
+    // Eğer examComponents yüklüyse ve içinde dersler varsa, tüm dersleri birleştirip fallback yapabiliriz
+    if (examComponents.length > 0) {
+      examComponents.forEach(c => {
+        if (c.dersler) {
+          c.dersler.forEach(d => {
+            const dersAdi = typeof d === 'string' ? d : (d?.ders_adi || d?.ad || d?.name || '');
+            if (dersAdi && !fallbackDersList.includes(dersAdi)) fallbackDersList.push(dersAdi);
+          });
+        }
+      });
+    }
+
+    if (studentArea.startsWith('yks')) {
+      if (examCompId === 'tyt') {
+        return fallbackDersList.filter(d => d.startsWith('TYT ') || !d.includes('AYT '));
+      } else if (examCompId === 'ayt') {
+        return fallbackDersList.filter(d => d.startsWith('AYT '));
+      }
+    }
+    return fallbackDersList;
+  };
+
+  const getExamSubjectIconUrl = (examCompId, subjectName) => {
+    if (!examCompId || !subjectName) return null;
+    const comp = examComponents.find(c => c.id === examCompId);
+    const found = comp?.dersler?.find(d => {
+      const dersAdi = typeof d === 'string' ? d : (d?.ders_adi || d?.ad || d?.name || '');
+      return dersAdi === subjectName;
+    });
+    if (found && typeof found === 'object') return found.icon_url || found.iconUrl || null;
+    return null;
+  };
+
+  // Öğrencinin sınav bileşenlerini çek
+  const fetchExamComponents = async (studentId) => {
+    if (!studentId) return;
+    setExamComponentsLoading(true);
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_exam_components.php?studentId=${studentId}`);
+      if (data.success) {
+        setExamComponents(data.components || []);
+        
+        // Eğer bileşenler varsa, varsayılan olarak ilkini seç
+        if (data.components && data.components.length > 0) {
+          const firstCompId = data.components[0].id;
+          
+          // Eğer tek bir bileşen varsa veya henüz seçim yapılmamışsa otomatik seç
+          if (data.components.length === 1 || !selectedQuestionExamArea) {
+            setSelectedQuestionExamArea(firstCompId);
+          }
+          if (data.components.length === 1 || !selectedExamArea) {
+            setSelectedExamArea(firstCompId);
+          }
+          if (data.components.length === 1 || !dersBasariExamType || dersBasariExamType === 'tyt') {
+            setDersBasariExamType(firstCompId);
+          }
+          if (data.components.length === 1 || !ilerlemeExamType || ilerlemeExamType === 'tyt') {
+            setIlerlemeExamType(firstCompId);
+          }
+          if (data.components.length === 1 || !bransExamType || bransExamType === 'tyt') {
+            setBransExamType(firstCompId);
+          }
+          if (data.components.length === 1 || !genelDenemeForm.sinavTipi || genelDenemeForm.sinavTipi === 'tyt') {
+            setGenelDenemeForm(prev => ({ ...prev, sinavTipi: firstCompId }));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Sınav bileşenleri yüklenemedi:', error);
+    } finally {
+      setExamComponentsLoading(false);
+    }
+  };
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -241,15 +420,18 @@ const OgrenciPanel = () => {
       navigate('/');
       return;
     }
-    // Öğrencinin alanını branş denemesi formuna set et
-    if (student?.alan && !bransDenemeForm.alan) {
-      setBransDenemeForm(prev => ({ ...prev, alan: student.alan }));
-    }
-
+    // ... (existing code)
     fetchStudentInfo(user.id);
-    fetchEtutStats(user.id);
-    fetchDenemeNetleri(user.id);
+    fetchExamComponents(user.id); // Yeni eklenen
+    // ...
   }, []);
+
+  // Sınav alanı değiştiğinde istatistikleri çek
+  useEffect(() => {
+    if (selectedQuestionExamArea && activeMenu === 'gunluk-soru' && activeQuestionTab === 'soru-dagilimi') {
+      fetchQuestionDistributionStatsForStudent();
+    }
+  }, [selectedQuestionExamArea, activeMenu, activeQuestionTab]);
 
   // Online durumu için heartbeat
   useEffect(() => {
@@ -260,7 +442,7 @@ const OgrenciPanel = () => {
 
     const setOnline = async () => {
       try {
-        await fetch(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
+        await safeFetchJson(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ studentId: user.id, onlineStatus: 1 })
@@ -295,7 +477,7 @@ const OgrenciPanel = () => {
       clearInterval(intervalId);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       // Component unmount olduğunda offline yapmayı dene
-      fetch(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
+      safeFetchJson(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ studentId: user.id, onlineStatus: 0 })
@@ -303,7 +485,7 @@ const OgrenciPanel = () => {
     };
   }, []);
 
-  // Menü değiştiğinde verileri yükle
+  // Menü veya seçimler değiştiğinde verileri yükle
   useEffect(() => {
     if (!student?.id) return;
 
@@ -346,7 +528,7 @@ const OgrenciPanel = () => {
         setGenelDenemeDersler({});
       }
     }
-  }, [activeMenu, student, selectedDersForIlerleme]);
+  }, [activeMenu, activeQuestionTab, selectedQuestionExamArea, selectedExamArea, dersBasariExamType, student, selectedDersForIlerleme]);
 
   // Genel deneme listesi güncellendiğinde ana sayfadaki son deneme kartını güncelle
   useEffect(() => {
@@ -429,10 +611,21 @@ const OgrenciPanel = () => {
     }
   }, [selectedSubject, allPrograms]);
 
+  const fetchStudentSubjects = async (studentId) => {
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?studentId=${studentId}`);
+      if (data.success && data.subjects) {
+        setAllSubjects(data.subjects);
+      }
+    } catch (error) {
+      console.error('Dersler yüklenemedi:', error);
+    }
+  };
+
   const fetchStudentInfo = async (studentId) => {
     try {
-      const response = await fetch(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
-      const data = await response.json();
+      fetchStudentSubjects(studentId);
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
       if (data.success && data.student) {
         setStudent(data.student);
         
@@ -493,10 +686,9 @@ const OgrenciPanel = () => {
       const endDate = weekEnd.toISOString().split('T')[0];
       const todayStr = today.toISOString().split('T')[0];
 
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=${startDate}&endDate=${endDate}`
       );
-      const data = await response.json();
       
       if (data.success && data.programs) {
         let todayRequired = 0;
@@ -504,10 +696,9 @@ const OgrenciPanel = () => {
         let weekPending = 0;
         let totalSolved = 0;
 
-        const allTimeResponse = await fetch(
+        const allTimeData = await safeFetchJson(
           `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=${todayStr}`
         );
-        const allTimeData = await allTimeResponse.json();
         const allPrograms = allTimeData.success ? allTimeData.programs : [];
 
         allPrograms.forEach(prog => {
@@ -597,10 +788,9 @@ const OgrenciPanel = () => {
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
 
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`
       );
-      const data = await response.json();
       
       if (data.success && data.programs) {
         const subjectMap = {};
@@ -677,10 +867,9 @@ const OgrenciPanel = () => {
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = today.toISOString().split('T')[0];
 
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=${startDateStr}&endDate=${endDateStr}`
       );
-      const data = await response.json();
 
       if (data.success && data.programs) {
         const currentWeekStart = new Date(today);
@@ -793,7 +982,10 @@ const OgrenciPanel = () => {
           total: 0,
           yapildi: 0,
           eksik_yapildi: 0,
-          yapilmadi: 0
+          yapilmadi: 0,
+          dogru: 0,
+          yanlis: 0,
+          bos: 0
         };
       }
 
@@ -807,17 +999,29 @@ const OgrenciPanel = () => {
       } else {
         topicMap[topic].yapilmadi += soruSayisi;
       }
+
+      const d = parseInt(prog.dogru) || 0;
+      const y = parseInt(prog.yanlis) || 0;
+      const b = parseInt(prog.bos) || 0;
+
+      topicMap[topic].dogru += d;
+      topicMap[topic].yanlis += y;
+      topicMap[topic].bos += b;
     });
 
     const statsWithPercentages = {};
     Object.keys(topicMap).forEach(topic => {
       const stats = topicMap[topic];
       const total = stats.total;
+      const totalSolved = stats.dogru + stats.yanlis + stats.bos;
+      
       statsWithPercentages[topic] = {
         ...stats,
         yapildiPercent: total > 0 ? Math.round((stats.yapildi / total) * 100) : 0,
         eksik_yapildiPercent: total > 0 ? Math.round((stats.eksik_yapildi / total) * 100) : 0,
-        yapilmadiPercent: total > 0 ? Math.round((stats.yapilmadi / total) * 100) : 0
+        yapilmadiPercent: total > 0 ? Math.round((stats.yapilmadi / total) * 100) : 0,
+        basariYuzdesi: totalSolved > 0 ? Math.round((stats.dogru / totalSolved) * 100) : 0,
+        totalSolved
       };
     });
 
@@ -831,10 +1035,9 @@ const OgrenciPanel = () => {
     try {
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${student.id}&startDate=2020-01-01&endDate=${todayStr}`
       );
-      const data = await response.json();
       if (data.success && data.programs) {
         setAllPrograms(data.programs);
       } else {
@@ -865,9 +1068,8 @@ const OgrenciPanel = () => {
       formData.append('photo', file);
       formData.append('_id', student.id);
       formData.append('type', 'student');
-      const res = await fetch(API_UPLOAD_PHOTO, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.message || 'Fotoğraf yüklenemedi');
+      const data = await safeFetchJson(API_UPLOAD_PHOTO, { method: 'POST', body: formData });
+      if (!data.success || !data.url) throw new Error(data.message || 'Fotoğraf yüklenemedi');
       setProfileForm(prev => ({ ...prev, profilePhoto: data.url }));
       setProfileSuccess('Fotoğraf yüklendi');
     } catch (err) {
@@ -912,13 +1114,12 @@ const OgrenciPanel = () => {
         payload.password = profileForm.newPassword;
       }
 
-      const res = await fetch(API_UPDATE_STUDENT, {
+      const data = await safeFetchJson(API_UPDATE_STUDENT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
+      if (!data.success) {
         throw new Error(data.message || 'Profil güncellenemedi');
       }
       setProfileSuccess('Profil güncellendi');
@@ -945,22 +1146,19 @@ const OgrenciPanel = () => {
   const fetchDersBasariStatsForStudent = async (studentId) => {
     setDersBasariLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=2099-12-31`
       );
-      const data = await response.json();
       if (data.success && data.programs) {
-        // Öğrencinin alanına göre ders listesini al (öğretmen paneli ile birebir)
-        const studentArea = student.alan || 'yks_say';
-        let studentSubjects = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
-
-        // YKS öğrencileri için TYT/AYT filtrelemesi
-        if (studentArea.startsWith('yks_')) {
-          if (dersBasariExamType === 'tyt') {
-            studentSubjects = studentSubjects.filter(s => s.startsWith('TYT '));
-          } else if (dersBasariExamType === 'ayt') {
-            studentSubjects = studentSubjects.filter(s => s.startsWith('AYT '));
-          }
+        // Seçili bileşene göre ders listesini al
+        const selectedComp = examComponents.find(c => c.id === dersBasariExamType);
+        let studentSubjects = [];
+        
+        if (selectedComp && selectedComp.dersler) {
+          studentSubjects = selectedComp.dersler;
+        } else if (examComponents.length > 0) {
+          // Eğer seçili bileşen yoksa ama bileşenler varsa, ilkini kullan
+          studentSubjects = examComponents[0].dersler || [];
         }
 
         const stats = {};
@@ -992,19 +1190,33 @@ const OgrenciPanel = () => {
             const d = parseInt(prog.dogru) || 0;
             const y = parseInt(prog.yanlis) || 0;
             const b = parseInt(prog.bos) || 0;
-            if (d || y || b) {
-              topicMap[konu].dogru += d;
-              topicMap[konu].yanlis += y;
-              topicMap[konu].bos += b;
-            }
+            
+            topicMap[konu].dogru += d;
+            topicMap[konu].yanlis += y;
+            topicMap[konu].bos += b;
           });
+
+          // Konu bazlı başarı yüzdelerini hesapla
+          Object.keys(topicMap).forEach(k => {
+            const t = topicMap[k];
+            const totalSolved = t.dogru + t.yanlis + t.bos;
+            t.totalSolved = totalSolved;
+            t.basariYuzdesi = totalSolved > 0 ? Math.round((t.dogru / totalSolved) * 100) : 0;
+            t.yapildiPercent = t.total > 0 ? Math.round((t.yapildi / t.total) * 100) : 0;
+          });
+
+          const subjectTotalSolved = Object.values(topicMap).reduce((acc, val) => acc + (val.dogru + val.yanlis + val.bos), 0);
+          const subjectTotalDogru = Object.values(topicMap).reduce((acc, val) => acc + val.dogru, 0);
+          const basariYuzdesi = subjectTotalSolved > 0 ? Math.round((subjectTotalDogru / subjectTotalSolved) * 100) : 0;
 
           const yapildiPercent = totalSoru > 0 ? Math.round((yapildiSoru / totalSoru) * 100) : 0;
           stats[subject] = {
             total: totalSoru,
             yapildi: yapildiSoru,
             yapilmadi: totalSoru - yapildiSoru,
-            yapildiPercent
+            yapildiPercent,
+            basariYuzdesi,
+            totalSolved: subjectTotalSolved
           };
           dersDetailMap[subject] = topicMap;
         });
@@ -1037,10 +1249,9 @@ const OgrenciPanel = () => {
       const startDateStr = weekStart.toISOString().split('T')[0];
       const endDateStr = weekEnd.toISOString().split('T')[0];
 
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=${startDateStr}&endDate=${endDateStr}`
       );
-      const data = await response.json();
       
       if (data.success && data.programs) {
         let yapilan = 0;
@@ -1095,8 +1306,7 @@ const OgrenciPanel = () => {
     try {
       let studentAlan = null;
       try {
-        const studentResponse = await fetch(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
-        const studentData = await studentResponse.json();
+        const studentData = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
         if (studentData.success && studentData.student) {
           studentAlan = studentData.student.alan;
         }
@@ -1104,8 +1314,7 @@ const OgrenciPanel = () => {
         console.error('Öğrenci bilgisi alınamadı:', err);
       }
       
-      const genelResponse = await fetch(`${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${studentId}`);
-      const genelData = await genelResponse.json();
+      const genelData = await safeFetchJson(`${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${studentId}`);
       
       if (genelData.success && genelData.denemeler && genelData.denemeler.length > 0) {
         let sonDeneme = genelData.denemeler[0];
@@ -1153,8 +1362,7 @@ const OgrenciPanel = () => {
         return;
       }
       
-      const bransResponse = await fetch(`${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${studentId}`);
-      const bransData = await bransResponse.json();
+      const bransData = await safeFetchJson(`${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${studentId}`);
       
       if (bransData.success && bransData.denemeler && bransData.denemeler.length > 0) {
         const sonDeneme = bransData.denemeler[0];
@@ -1183,10 +1391,9 @@ const OgrenciPanel = () => {
     }
     setKonuIlerlemesiLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
       );
-      const data = await response.json();
       
       if (data.success && data.konular && data.konular.length > 0) {
         setKonuIlerlemesi(data.konular);
@@ -1226,7 +1433,7 @@ const OgrenciPanel = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/php-backend/api/save_konu_ilerlemesi.php`, {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/save_konu_ilerlemesi.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1235,8 +1442,6 @@ const OgrenciPanel = () => {
           konular: konuIlerlemesi
         })
       });
-
-      const data = await response.json();
       if (data.success) {
         if (!silent) {
           alert('Konu ilerlemesi kaydedildi!');
@@ -1305,15 +1510,16 @@ const OgrenciPanel = () => {
   }, [bransDenemeForm.dogru, bransDenemeForm.yanlis]);
 
   // Öğrencinin alanına göre ders listesini belirle
-  const bransAreaRaw = student?.alan || '';
-  const bransArea = (bransAreaRaw || '').toLowerCase();
-  const bransIsYks = bransArea.startsWith('yks');
-  const bransDersListRaw = EXAM_SUBJECTS_BY_AREA[bransArea] || [];
-  const bransDersList = bransIsYks 
-    ? (bransExamType === 'tyt' 
-        ? bransDersListRaw.filter(d => d.startsWith('TYT '))
-        : bransDersListRaw.filter(d => d.startsWith('AYT ')))
-    : bransDersListRaw;
+  const bransDersList = useMemo(() => {
+    const selectedComp = examComponents.find(c => c.id === bransExamType);
+    if (selectedComp && selectedComp.dersler) {
+      return selectedComp.dersler;
+    }
+    if (examComponents.length > 0) {
+      return examComponents[0].dersler || [];
+    }
+    return [];
+  }, [bransExamType, examComponents]);
 
   const handleBransFormChange = (field, value) => {
     setBransDenemeForm((prev) => ({
@@ -1333,10 +1539,9 @@ const OgrenciPanel = () => {
       return;
     }
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${student.id}&ders=${encodeURIComponent(dersName)}`
       );
-      const data = await response.json();
       if (data.success && data.konular && data.konular.length > 0) {
         const mapped = data.konular
           .slice()
@@ -1414,7 +1619,7 @@ const OgrenciPanel = () => {
     });
     setBransKaydediliyor(true);
     try {
-      const response = await fetch(`${API_BASE}/php-backend/api/save_brans_deneme.php`, {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/save_brans_deneme.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1431,7 +1636,6 @@ const OgrenciPanel = () => {
           konular: payloadKonular
         })
       });
-      const data = await response.json();
       if (data.success) {
         alert('Branş denemesi kaydedildi');
         fetchBransDenemeleri();
@@ -1452,10 +1656,9 @@ const OgrenciPanel = () => {
     if (!student?.id) return;
     setBransDenemelerLoading(true);
     try {
-      const response = await fetch(
+      const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_brans_denemeleri.php?studentId=${student.id}`
       );
-      const data = await response.json();
       if (data.success && data.denemeler) {
         setBransDenemeList(data.denemeler);
         if (data.denemeler.length > 0 && !bransChartsSelectedDers) {
@@ -1569,7 +1772,7 @@ const OgrenciPanel = () => {
         net: Number(data.net) || 0
       }));
 
-      const response = await fetch(`${API_BASE}/php-backend/api/save_genel_deneme.php`, {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/save_genel_deneme.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1590,7 +1793,6 @@ const OgrenciPanel = () => {
           degerlendirme: genelDenemeDegerlendirme
         })
       });
-      const data = await response.json();
       if (data.success) {
         alert('Deneme sonucu kaydedildi');
         setGenelDenemeForm({ denemeAdi: '', denemeTarihi: '', notlar: '', sinavTipi: 'tyt' });
@@ -1625,7 +1827,9 @@ const OgrenciPanel = () => {
     
     if (!genelDenemeList || genelDenemeList.length === 0) {
       console.log('❌ Deneme listesi boş veya undefined');
-      return { tytOrtalama: 0, aytOrtalama: 0, digerOrtalama: 0 };
+      const emptyRes = {};
+      examComponents.forEach(c => emptyRes[c.id] = 0);
+      return emptyRes;
     }
     
     console.log('✅ Deneme listesi dolu, hesaplama yapılıyor...');
@@ -1639,84 +1843,47 @@ const OgrenciPanel = () => {
     } else if (genelDenemeFilter === 'son-10') {
       filteredDenemeler = filteredDenemeler.slice(0, 10);
     } else if (genelDenemeFilter === 'tum-denemeler') {
-      // Tüm denemeler - filtreleme yapma, tüm listeyi kullan
       filteredDenemeler = filteredDenemeler;
     } else {
-      // son-deneme (varsayılan)
       filteredDenemeler = filteredDenemeler.slice(0, 1);
     }
 
-    console.log('Filtrelenmiş denemeler:', filteredDenemeler);
-
-    // TYT, AYT ve diğer sınav tipleri (LGS, KPSS vs.) için netlerini topla
-    let tytToplamNet = 0;
-    let tytSayisi = 0;
-    let aytToplamNet = 0;
-    let aytSayisi = 0;
-    let digerToplamNet = 0;
-    let digerSayisi = 0;
+    const componentStats = {};
+    examComponents.forEach(c => {
+      componentStats[c.id] = { totalNet: 0, count: 0 };
+    });
 
     filteredDenemeler.forEach((deneme) => {
-      const sinavTipi = (deneme.sinavTipi || 'tyt').toLowerCase();
+      const sinavTipi = deneme.sinavTipi;
+      if (!componentStats[sinavTipi]) return;
+
       const dersSonuclari = deneme.dersSonuclari || {};
-      
-      console.log(`Deneme: ${deneme.denemeAdi}, sinavTipi: ${sinavTipi}, dersSonuclari:`, dersSonuclari);
-      
+      const component = examComponents.find(c => c.id === sinavTipi);
+      const componentDersler = component ? (component.dersler || []) : [];
+
       let toplamNet = 0;
-      
-      // TYT veya AYT için: sadece ilgili dersleri say
-      if (sinavTipi === 'tyt' || sinavTipi === 'ayt') {
-        Object.entries(dersSonuclari).forEach(([ders, data]) => {
-          let netValue = 0;
-          if (data && data.net !== undefined && data.net !== null) {
-            netValue = parseFloat(data.net) || 0;
-          }
-          
-          if (sinavTipi === 'tyt' && ders.startsWith('TYT ')) {
-            toplamNet += netValue;
-            console.log(`  TYT Ders: ${ders}, net: ${netValue}, toplamNet: ${toplamNet}`);
-          } else if (sinavTipi === 'ayt' && ders.startsWith('AYT ')) {
-            toplamNet += netValue;
-            console.log(`  AYT Ders: ${ders}, net: ${netValue}, toplamNet: ${toplamNet}`);
-          }
-        });
-      } else {
-        // LGS, KPSS gibi diğer sınav tipleri için: tüm derslerin netlerini topla
-        Object.entries(dersSonuclari).forEach(([ders, data]) => {
+      Object.entries(dersSonuclari).forEach(([ders, data]) => {
+        if (componentDersler.includes(ders)) {
           let netValue = 0;
           if (data && data.net !== undefined && data.net !== null) {
             netValue = parseFloat(data.net) || 0;
           }
           toplamNet += netValue;
-          console.log(`  ${sinavTipi.toUpperCase()} Ders: ${ders}, net: ${netValue}, toplamNet: ${toplamNet}`);
-        });
-      }
+        }
+      });
 
-      // sinavTipi'ne göre say
-      if (sinavTipi === 'tyt') {
-        tytToplamNet += toplamNet;
-        tytSayisi++;
-        console.log(`TYT Deneme: ${deneme.denemeAdi}, toplamNet: ${toplamNet}, tytToplamNet: ${tytToplamNet}, tytSayisi: ${tytSayisi}`);
-      } else if (sinavTipi === 'ayt') {
-        aytToplamNet += toplamNet;
-        aytSayisi++;
-        console.log(`AYT Deneme: ${deneme.denemeAdi}, toplamNet: ${toplamNet}, aytToplamNet: ${aytToplamNet}, aytSayisi: ${aytSayisi}`);
-      } else {
-        // LGS, KPSS ve diğer sınav tipleri
-        digerToplamNet += toplamNet;
-        digerSayisi++;
-        console.log(`${sinavTipi.toUpperCase()} Deneme: ${deneme.denemeAdi}, toplamNet: ${toplamNet}, digerToplamNet: ${digerToplamNet}, digerSayisi: ${digerSayisi}`);
-      }
+      componentStats[sinavTipi].totalNet += toplamNet;
+      componentStats[sinavTipi].count++;
     });
 
-    const tytOrtalama = tytSayisi > 0 ? parseFloat((tytToplamNet / tytSayisi).toFixed(2)) : 0;
-    const aytOrtalama = aytSayisi > 0 ? parseFloat((aytToplamNet / aytSayisi).toFixed(2)) : 0;
-    const digerOrtalama = digerSayisi > 0 ? parseFloat((digerToplamNet / digerSayisi).toFixed(2)) : 0;
+    const results = {};
+    examComponents.forEach(c => {
+      const stats = componentStats[c.id];
+      results[c.id] = stats.count > 0 ? parseFloat((stats.totalNet / stats.count).toFixed(2)) : 0;
+    });
 
-    console.log(`Ortalama Hesaplama Sonuç: tytToplamNet=${tytToplamNet}, tytSayisi=${tytSayisi}, tytOrtalama=${tytOrtalama}, aytToplamNet=${aytToplamNet}, aytSayisi=${aytSayisi}, aytOrtalama=${aytOrtalama}, digerToplamNet=${digerToplamNet}, digerSayisi=${digerSayisi}, digerOrtalama=${digerOrtalama}`);
-
-    return { tytOrtalama, aytOrtalama, digerOrtalama };
-  }, [genelDenemeList, genelDenemeFilter]);
+    return results;
+  }, [genelDenemeList, genelDenemeFilter, examComponents]);
 
   // Genel Denemeler - Veri çekme
   const fetchGenelDenemeler = async () => {
@@ -1729,8 +1896,7 @@ const OgrenciPanel = () => {
     try {
       const url = `${API_BASE}/php-backend/api/get_genel_denemeler.php?studentId=${student.id}`;
       console.log('📡 API URL:', url);
-      const response = await fetch(url);
-      const data = await response.json();
+      const data = await safeFetchJson(url);
       console.log('📥 fetchGenelDenemeler response:', data);
       if (data.success && data.denemeler) {
         console.log('✅ fetchGenelDenemeler: Denemeler yüklendi, sayı:', data.denemeler.length);
@@ -1757,7 +1923,7 @@ const OgrenciPanel = () => {
     const user = JSON.parse(localStorage.getItem('user'));
     if (user && user.id && user.role === 'ogrenci') {
       try {
-        await fetch(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
+        await safeFetchJson(`${API_BASE}/php-backend/api/update_student_online_status.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ studentId: user.id, onlineStatus: 0 })
@@ -1965,6 +2131,115 @@ const OgrenciPanel = () => {
             )}
           </div>
         </div>
+
+        {/* Okunmamış Bildirimler */}
+        <div style={{ 
+          background: 'white',
+          borderRadius: '16px',
+          padding: '24px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          marginBottom: '24px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px', gap: '16px', borderBottom: '1px solid #f3f4f6', paddingBottom: '16px' }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              borderRadius: '12px', 
+              background: '#f0f9ff', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: '#0284c7'
+            }}>
+              <FontAwesomeIcon icon={faBell} style={{ fontSize: '20px' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>
+                Okunmamış Bildirimler
+              </h3>
+              <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#6b7280' }}>
+                Öğretmeninden gelen son bildirimler
+              </p>
+            </div>
+            {unreadNotifications.length > 0 && (
+              <span style={{ 
+                background: '#ef4444', 
+                color: 'white', 
+                padding: '6px 12px', 
+                borderRadius: '20px', 
+                fontSize: '14px', 
+                fontWeight: 600,
+                boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)'
+              }}>
+                {unreadNotifications.length} Yeni
+              </span>
+            )}
+          </div>
+          
+          {unreadNotificationsLoading ? (
+             <div style={{ color: '#6b7280', textAlign: 'center', padding: '32px' }}>Bildirimler yükleniyor...</div>
+          ) : unreadNotifications.length === 0 ? (
+             <div style={{ color: '#9ca3af', textAlign: 'center', padding: '32px', fontSize: '15px', background: '#f9fafb', borderRadius: '12px' }}>
+               Okunmamış bildiriminiz bulunmuyor.
+             </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {unreadNotifications.map((notification) => (
+                <div key={notification.id} style={{ 
+                  padding: '20px', 
+                  background: '#ffffff', 
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  gap: '20px',
+                  alignItems: 'flex-start'
+                }} 
+                className="dashboard-notification-item"
+                onClick={() => setActiveMenu('bildirimler')}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
+                  e.currentTarget.style.borderColor = '#0284c7';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                  e.currentTarget.style.borderColor = '#e5e7eb';
+                }}
+                >
+                  <div style={{ 
+                    width: '12px', 
+                    height: '12px', 
+                    borderRadius: '50%', 
+                    background: '#ef4444', 
+                    marginTop: '6px',
+                    flexShrink: 0
+                  }}></div>
+                  
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#111827' }}>
+                        {notification.title}
+                      </h4>
+                      <span style={{ fontSize: '13px', color: '#6b7280', whiteSpace: 'nowrap', background: '#f3f4f6', padding: '4px 8px', borderRadius: '6px' }}>
+                        {new Date(notification.created_at).toLocaleDateString('tr-TR')}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '15px', color: '#4b5563', lineHeight: '1.5' }}>
+                      {notification.message}
+                    </p>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', alignSelf: 'center', color: '#9ca3af' }}>
+                    <FontAwesomeIcon icon={faChevronRight} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2009,6 +2284,15 @@ const OgrenciPanel = () => {
       <div className="main-content">
         <div className="content-area">
           {activeMenu === 'ana-sayfa' && renderAnaSayfa()}
+          {activeMenu === 'bildirimler' && student && (
+             <div style={{ padding: '32px' }}>
+                <Bildirimler
+                  studentId={student.id}
+                  userRole="student"
+                  filter="student"
+                />
+             </div>
+          )}
           {activeMenu === 'plan-program' && student && (
             <OgrenciProgramTab student={student} teacherId={null} isStudentPanel={true} />
           )}
@@ -2103,117 +2387,48 @@ const OgrenciPanel = () => {
                       </div>
                       
                       <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
-                        {(() => {
-                          const studentArea = student?.alan || '';
-                          const isYks = studentArea.startsWith('yks_');
-                          
-                          if (isYks) {
-                            return (
-                              <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                                <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                                  <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                                  YKS
-                                </h4>
-                                <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedQuestionExamArea('tyt');
-                                      setQuestionDistributionPeriod('gunluk');
-                                      fetchQuestionDistributionStatsForStudent();
-                                    }}
-                                    style={{
-                                      padding: '14px 24px',
-                                      background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                      border: '2px solid #e5e7eb',
-                                      borderRadius: 12,
-                                      cursor: 'pointer',
-                                      fontSize: '15px',
-                                      fontWeight: 600,
-                                      color: '#374151',
-                                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                      position: 'relative',
-                                      overflow: 'hidden'
-                                    }}
-                                  >
-                                    TYT
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedQuestionExamArea('ayt');
-                                      setQuestionDistributionPeriod('gunluk');
-                                      fetchQuestionDistributionStatsForStudent();
-                                    }}
-                                    style={{
-                                      padding: '14px 24px',
-                                      background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                      border: '2px solid #e5e7eb',
-                                      borderRadius: 12,
-                                      cursor: 'pointer',
-                                      fontSize: '15px',
-                                      fontWeight: 600,
-                                      color: '#374151',
-                                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                      position: 'relative',
-                                      overflow: 'hidden'
-                                    }}
-                                  >
-                                    AYT
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          }
-                          
-                          // Diğer sınavlar
-                          return EXAM_CATEGORY_OPTIONS.map((group) => {
-                            if (group.label === 'YKS') return null;
-                            
-                            const visibleOptions = group.options.filter((option) => {
-                              return !studentArea || option.value === studentArea;
-                            });
-
-                            if (visibleOptions.length === 0) return null;
-
-                            return (
-                              <div key={group.label} style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                                <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                                  <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                                  {group.label}
-                                </h4>
-                                <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                                  {visibleOptions.map((option) => (
-                                    <button
-                                      key={option.value}
-                                      onClick={() => {
-                                        setSelectedQuestionExamArea(option.value);
-                                        setQuestionDistributionPeriod('gunluk');
-                                        fetchQuestionDistributionStatsForStudent();
-                                      }}
-                                      style={{
-                                        padding: '14px 24px',
-                                        background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                        border: '2px solid #e5e7eb',
-                                        borderRadius: 12,
-                                        cursor: 'pointer',
-                                        fontSize: '15px',
-                                        fontWeight: 600,
-                                        color: '#374151',
-                                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                        position: 'relative',
-                                        overflow: 'hidden'
-                                      }}
-                                    >
-                                      {option.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
+                        {examComponentsLoading ? (
+                          <div style={{textAlign: 'center', padding: '40px', color: '#6b7280'}}>Yükleniyor...</div>
+                        ) : examComponents.length > 0 ? (
+                          <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
+                            <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
+                              <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
+                              {student?.alanName || 'Sınav'}
+                            </h4>
+                            <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
+                              {examComponents.map((comp) => (
+                                <button
+                                  key={comp.id}
+                                  onClick={() => {
+                                    setSelectedQuestionExamArea(comp.id);
+                                    setQuestionDistributionPeriod('gunluk');
+                                    fetchQuestionDistributionStatsForStudent();
+                                  }}
+                                  style={{
+                                    padding: '14px 24px',
+                                    background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
+                                    border: '2px solid #e5e7eb',
+                                    borderRadius: 12,
+                                    cursor: 'pointer',
+                                    fontSize: '15px',
+                                    fontWeight: 600,
+                                    color: '#374151',
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                    position: 'relative',
+                                    overflow: 'hidden'
+                                  }}
+                                >
+                                  {comp.ad}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{textAlign: 'center', padding: '40px', color: '#6b7280'}}>
+                            Sınav alanı bulunamadı. Lütfen profilinizden sınav alanınızı kontrol edin.
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -2296,74 +2511,87 @@ const OgrenciPanel = () => {
                               ← Geri
                             </button>
                             <h3 style={{fontSize: '22px', fontWeight: 700, color: '#1f2937', letterSpacing: '-0.5px'}}>
-                              {selectedQuestionExamArea === 'tyt' ? 'TYT Soru Dağılımı' : 
-                               selectedQuestionExamArea === 'ayt' ? 'AYT Soru Dağılımı' :
-                               EXAM_CATEGORY_OPTIONS.flatMap(g => g.options).find(o => o.value === selectedQuestionExamArea)?.label || 'Soru Dağılımı'}
+                              {(() => {
+                                const component = examComponents.find(c => c.id === selectedQuestionExamArea);
+                                if (component) return `${component.ad} Soru Dağılımı`;
+                                
+                                // Geriye dönük uyumluluk için eski kontrol
+                                if (selectedQuestionExamArea === 'tyt') return 'TYT Soru Dağılımı';
+                                if (selectedQuestionExamArea === 'ayt') return 'AYT Soru Dağılımı';
+                                return EXAM_CATEGORY_OPTIONS.flatMap(g => g.options).find(o => o.value === selectedQuestionExamArea)?.label || 'Soru Dağılımı';
+                              })()}
                             </h3>
                           </div>
 
                           {/* Ders Bazlı Bar Grafikleri */}
                           <div style={{display: 'flex', gap: 32, minHeight: '450px', padding: '40px 20px', position: 'relative'}}>
                             <div style={{flex: 1, display: 'flex', alignItems: 'flex-end', gap: 24, justifyContent: 'center'}}>
-                              {Object.entries(questionDistributionStats)
-                                .filter(([subject, stats]) => stats.yapildi > 0)
-                                .length === 0 ? (
-                                  <div style={{
-                                    width: '100%',
-                                    textAlign: 'center',
-                                    padding: '80px 20px',
-                                    color: '#6b7280',
-                                    fontSize: '16px'
-                                  }}>
-                                    <div style={{fontSize: '48px', marginBottom: 16, opacity: 0.5}}>📊</div>
-                                    <div style={{fontWeight: 600, marginBottom: 8}}>Henüz yapılan soru bulunmuyor</div>
-                                    <div style={{fontSize: '14px', color: '#9ca3af'}}>Soru çözdükçe burada dağılımı göreceksin.</div>
-                                  </div>
-                                ) : (
-                                  Object.entries(questionDistributionStats)
-                                    .filter(([subject, stats]) => stats.yapildi > 0)
-                                    .sort((a, b) => b[1].yapildi - a[1].yapildi)
-                                    .map(([subject, stats]) => {
-                                      const maxValue = Math.max(...Object.values(questionDistributionStats).map(s => s.yapildi || 0), 1);
-                                      const maxBarHeight = 300;
-                                      const actualBarHeight = maxValue > 0 ? (stats.yapildi / maxValue) * maxBarHeight : 0;
-                                      
-                                      return (
-                                        <div key={subject} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, maxWidth: '120px'}}>
-                                          <div style={{fontSize: 14, fontWeight: 600, color: '#111827', textAlign: 'center'}}>
-                                            {subject}
-                                          </div>
-                                          <div style={{position: 'relative', height: maxBarHeight, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center'}}>
+                              {(() => {
+                                const component = examComponents.find(c => c.id === selectedQuestionExamArea);
+                                const componentSubjects = component ? (component.dersler || []) : [];
+                                
+                                const filteredStats = Object.entries(questionDistributionStats)
+                                  .filter(([subject, stats]) => stats.yapildi > 0 && componentSubjects.includes(subject));
+                                
+                                if (filteredStats.length === 0) {
+                                  return (
+                                    <div style={{
+                                      width: '100%',
+                                      textAlign: 'center',
+                                      padding: '80px 20px',
+                                      color: '#6b7280',
+                                      fontSize: '16px'
+                                    }}>
+                                      <div style={{fontSize: '48px', marginBottom: 16, opacity: 0.5}}>📊</div>
+                                      <div style={{fontWeight: 600, marginBottom: 8}}>Henüz yapılan soru bulunmuyor</div>
+                                      <div style={{fontSize: '14px', color: '#9ca3af'}}>Soru çözdükçe burada dağılımı göreceksin.</div>
+                                    </div>
+                                  );
+                                }
+
+                                return filteredStats
+                                  .sort((a, b) => b[1].yapildi - a[1].yapildi)
+                                  .map(([subject, stats]) => {
+                                    const maxValue = Math.max(...filteredStats.map(s => s[1].yapildi || 0), 1);
+                                    const maxBarHeight = 300;
+                                    const actualBarHeight = maxValue > 0 ? (stats.yapildi / maxValue) * maxBarHeight : 0;
+                                    
+                                    return (
+                                      <div key={subject} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, maxWidth: '120px'}}>
+                                        <div style={{fontSize: 14, fontWeight: 600, color: '#111827', textAlign: 'center'}}>
+                                          {subject}
+                                        </div>
+                                        <div style={{position: 'relative', height: maxBarHeight, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center'}}>
+                                          <div style={{
+                                            width: '40px',
+                                            height: `${Math.max(actualBarHeight, 4)}px`,
+                                            borderRadius: '0',
+                                            background: 'linear-gradient(180deg, #6a1b9a, #8e24aa)',
+                                            boxShadow: '0 8px 20px rgba(106,27,154,0.3)',
+                                            position: 'relative',
+                                            overflow: 'hidden'
+                                          }}>
                                             <div style={{
-                                              width: '40px',
-                                              height: `${Math.max(actualBarHeight, 4)}px`,
-                                              borderRadius: '999px 999px 0 0',
-                                              background: 'linear-gradient(180deg, #6a1b9a, #8e24aa)',
-                                              boxShadow: '0 8px 20px rgba(106,27,154,0.3)',
-                                              position: 'relative',
-                                              overflow: 'hidden'
+                                              position: 'absolute',
+                                              top: 0,
+                                              left: '50%',
+                                              transform: 'translateX(-50%)',
+                                              background: 'white',
+                                              borderRadius: 0,
+                                              padding: '4px 8px',
+                                              fontSize: 12,
+                                              fontWeight: 700,
+                                              color: '#6a1b9a',
+                                              boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
                                             }}>
-                                              <div style={{
-                                                position: 'absolute',
-                                                top: -28,
-                                                left: '50%',
-                                                transform: 'translateX(-50%)',
-                                                background: 'white',
-                                                borderRadius: 999,
-                                                padding: '4px 8px',
-                                                fontSize: 12,
-                                                fontWeight: 700,
-                                                color: '#6a1b9a',
-                                                boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
-                                              }}>
-                                                {stats.yapildi} soru
-                                              </div>
+                                              {stats.yapildi} soru
                                             </div>
                                           </div>
                                         </div>
-                                      );
-                                    })
-                                )}
+                                      </div>
+                                    );
+                                  });
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -2392,97 +2620,55 @@ const OgrenciPanel = () => {
                         </p>
                       </div>
                       <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
-                        {(() => {
-                          const studentArea = student?.alan || '';
-                          const isYks = studentArea.startsWith('yks_');
-                          if (isYks) {
-                            return (
-                              <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                                <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                                  <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                                  YKS
-                                </h4>
-                                <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedExamArea('tyt');
-                                      setSelectedSubject(null);
-                                      setTopicStats({});
-                                    }}
-                                    style={{
-                                      padding: '14px 24px',
-                                      background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                      border: '2px solid #e5e7eb',
-                                      borderRadius: 12,
-                                      cursor: 'pointer',
-                                      fontSize: '15px',
-                                      fontWeight: 600,
-                                      color: '#374151'
-                                    }}
-                                  >
-                                    TYT
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedExamArea('ayt');
-                                      setSelectedSubject(null);
-                                      setTopicStats({});
-                                    }}
-                                    style={{
-                                      padding: '14px 24px',
-                                      background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                      border: '2px solid #e5e7eb',
-                                      borderRadius: 12,
-                                      cursor: 'pointer',
-                                      fontSize: '15px',
-                                      fontWeight: 600,
-                                      color: '#374151'
-                                    }}
-                                  >
-                                    AYT
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          }
-                          return EXAM_CATEGORY_OPTIONS.map((group) => {
-                            if (group.label === 'YKS') return null;
-                            const visibleOptions = group.options.filter((option) => !studentArea || option.value === studentArea);
-                            if (visibleOptions.length === 0) return null;
-                            return (
-                              <div key={group.label} style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                                <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
-                                  <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
-                                  {group.label}
-                                </h4>
-                                <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
-                                  {visibleOptions.map((option) => (
-                                    <button
-                                      key={option.value}
-                                      onClick={() => {
-                                        setSelectedExamArea(option.value);
-                                        setSelectedSubject(null);
-                                        setTopicStats({});
-                                      }}
-                                      style={{
-                                        padding: '14px 24px',
-                                        background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
-                                        border: '2px solid #e5e7eb',
-                                        borderRadius: 12,
-                                        cursor: 'pointer',
-                                        fontSize: '15px',
-                                        fontWeight: 600,
-                                        color: '#374151'
-                                      }}
-                                    >
-                                      {option.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
+                        {examComponentsLoading ? (
+                          <div style={{color: '#6b7280', fontSize: '14px', padding: '10px'}}>Sınav bileşenleri yükleniyor...</div>
+                        ) : examComponents.length > 0 ? (
+                          <div style={{background: 'white', borderRadius: 16, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
+                            <h4 style={{fontSize: '18px', fontWeight: 600, marginBottom: 16, color: '#374151', display: 'flex', alignItems: 'center', gap: 8}}>
+                              <span style={{width: 4, height: 24, background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)', borderRadius: 2}}></span>
+                              {student?.alanName || 'Sınav'}
+                            </h4>
+                            <div style={{display: 'flex', flexWrap: 'wrap', gap: 12}}>
+                              {examComponents.map((comp) => (
+                                <button
+                                  key={comp.id}
+                                  onClick={() => {
+                                    setSelectedExamArea(comp.id);
+                                    setSelectedSubject(null);
+                                    setTopicStats({});
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                    e.currentTarget.style.borderColor = '#6a1b9a';
+                                    e.currentTarget.style.color = '#6a1b9a';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(106, 27, 154, 0.1)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.borderColor = '#e5e7eb';
+                                    e.currentTarget.style.color = '#374151';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                  }}
+                                  style={{
+                                    padding: '14px 24px',
+                                    background: 'linear-gradient(135deg, #f9fafb, #ffffff)',
+                                    border: '2px solid #e5e7eb',
+                                    borderRadius: 12,
+                                    cursor: 'pointer',
+                                    fontSize: '15px',
+                                    fontWeight: 600,
+                                    color: '#374151',
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                                  }}
+                                >
+                                  {comp.ad}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{color: '#ef4444', fontSize: '14px', padding: '10px'}}>Bu alan için sınav bileşeni tanımlanmamış.</div>
+                        )}
                       </div>
                     </div>
                   ) : !selectedSubject ? (
@@ -2509,31 +2695,16 @@ const OgrenciPanel = () => {
                         </button>
                         <div>
                           <h3 style={{fontSize: '24px', fontWeight: 700, color: '#1f2937', marginBottom: 4}}>
-                            {selectedExamArea === 'tyt' ? 'TYT Konu Dağılımı' : 
-                             selectedExamArea === 'ayt' ? 'AYT Konu Dağılımı' :
-                             EXAM_CATEGORY_OPTIONS.flatMap(g => g.options).find(o => o.value === selectedExamArea)?.label || 'Ders Seçin'}
+                            {examComponents.find(c => c.id === selectedExamArea)?.ad || 'Konu Dağılımı'}
                           </h3>
                           <p style={{fontSize: '14px', color: '#6b7280'}}>Ders seçerek konu analizine başlayın</p>
                         </div>
                       </div>
                       
                       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16}}>
-                        {(() => {
-                          let subjects = [];
-                          if (selectedExamArea === 'tyt') {
-                            subjects = EXAM_SUBJECTS_BY_AREA['yks_tyt'] || [];
-                          } else if (selectedExamArea === 'ayt') {
-                            const studentArea = student?.alan || '';
-                            if (studentArea && studentArea.startsWith('yks_')) {
-                              const allSubjects = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
-                              subjects = allSubjects.filter(s => s.startsWith('AYT '));
-                            }
-                          } else {
-                            subjects = EXAM_SUBJECTS_BY_AREA[selectedExamArea] || [];
-                          }
-                          return subjects;
-                        })().map((subject) => {
+                        {getDersList(selectedExamArea).map((subject) => {
                           const hasPrograms = allPrograms.some(prog => prog.ders === subject);
+                          const iconSrc = resolveIconUrl(getExamSubjectIconUrl(selectedExamArea, subject)) || getSubjectIcon(subject, allSubjects);
                           return (
                             <button
                               key={subject}
@@ -2554,6 +2725,16 @@ const OgrenciPanel = () => {
                                 opacity: hasPrograms ? 1 : 0.6
                               }}
                             >
+                              {(() => {
+                                return iconSrc ? (
+                                  <img 
+                                    src={iconSrc} 
+                                    alt="" 
+                                    style={{ width: 36, height: 36, objectFit: 'contain', marginBottom: 8 }}
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : null;
+                              })()}
                               {subject}
                               {!hasPrograms && (
                                 <div style={{fontSize: '12px', marginTop: 8, color: '#9ca3af', fontWeight: 400}}>
@@ -2605,9 +2786,9 @@ const OgrenciPanel = () => {
                       ) : (
                         <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                           {Object.entries(topicStats)
-                            .sort((a, b) => (b[1].total || 0) - (a[1].total || 0))
+                            .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                             .map(([konu, stats]) => {
-                              const topicPercent = stats.total > 0 ? Math.round((stats.yapildi / stats.total) * 100) : 0;
+                              const topicPercent = stats.basariYuzdesi || 0;
                               const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
                               return (
                                 <div key={konu} style={{background: '#f9fafb', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb'}}>
@@ -2619,8 +2800,13 @@ const OgrenciPanel = () => {
                                     <div style={{width: `${topicPercent}%`, height: '100%', background: topicColor, transition: 'width 0.3s ease'}} />
                                   </div>
                                   <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#6b7280'}}>
-                                    <span>Çözülen: <strong style={{color: '#10b981'}}>{stats.yapildi}</strong></span>
+                                    <span>Çözülen: <strong style={{color: '#10b981'}}>{stats.totalSolved}</strong></span>
                                     <span>Verilen: <strong style={{color: '#1f2937'}}>{stats.total}</strong></span>
+                                  </div>
+                                  <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#6b7280', marginTop: 8}}>
+                                    <span>Doğru: <strong style={{color: '#065f46'}}>{stats.dogru || 0}</strong></span>
+                                    <span>Yanlış: <strong style={{color: '#b91c1c'}}>{stats.yanlis || 0}</strong></span>
+                                    <span>Boş: <strong style={{color: '#374151'}}>{stats.bos || 0}</strong></span>
                                   </div>
                                 </div>
                               );
@@ -2913,6 +3099,7 @@ const OgrenciPanel = () => {
                       <input
                         type="password"
                         name="newPassword"
+                        autoComplete="new-password"
                         value={profileForm.newPassword}
                         onChange={handleProfileChange}
                         placeholder="Değiştirmek istemiyorsan boş bırak"
@@ -2924,6 +3111,7 @@ const OgrenciPanel = () => {
                       <input
                         type="password"
                         name="newPasswordConfirm"
+                        autoComplete="new-password"
                         value={profileForm.newPasswordConfirm}
                         onChange={handleProfileChange}
                         style={{width: '100%', padding: 10, borderRadius: 10, border: '1px solid #d1d5db'}}
@@ -2969,65 +3157,40 @@ const OgrenciPanel = () => {
                       Ders/Konu Bazlı Başarım
                     </h2>
 
-                    {/* TYT/AYT sekmeleri - Sadece YKS öğrencileri için */}
-                    {student?.alan?.startsWith('yks_') && (
+                    {/* Dinamik Sınav Bileşenleri Sekmeleri */}
+                    {examComponents.length > 1 && (
                       <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                        <button 
-                          onClick={() => setDersBasariExamType('tyt')}
-                          style={{
-                            padding: '10px 20px',
-                            borderRadius: 8,
-                            border: 'none',
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            background: dersBasariExamType === 'tyt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                            color: dersBasariExamType === 'tyt' ? 'white' : '#6b7280'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (dersBasariExamType !== 'tyt') {
-                              e.target.style.background = '#f3f4f6';
-                              e.target.style.color = '#374151';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (dersBasariExamType !== 'tyt') {
-                              e.target.style.background = 'transparent';
-                              e.target.style.color = '#6b7280';
-                            }
-                          }}
-                        >
-                          TYT
-                        </button>
-                        <button 
-                          onClick={() => setDersBasariExamType('ayt')}
-                          style={{
-                            padding: '10px 20px',
-                            borderRadius: 8,
-                            border: 'none',
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            background: dersBasariExamType === 'ayt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                            color: dersBasariExamType === 'ayt' ? 'white' : '#6b7280'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (dersBasariExamType !== 'ayt') {
-                              e.target.style.background = '#f3f4f6';
-                              e.target.style.color = '#374151';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (dersBasariExamType !== 'ayt') {
-                              e.target.style.background = 'transparent';
-                              e.target.style.color = '#6b7280';
-                            }
-                          }}
-                        >
-                          AYT
-                        </button>
+                        {examComponents.map((comp) => (
+                          <button 
+                            key={comp.id}
+                            onClick={() => setDersBasariExamType(comp.id)}
+                            style={{
+                              padding: '10px 20px',
+                              borderRadius: 8,
+                              border: 'none',
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              background: dersBasariExamType === comp.id ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
+                              color: dersBasariExamType === comp.id ? 'white' : '#6b7280'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (dersBasariExamType !== comp.id) {
+                                e.target.style.background = '#f3f4f6';
+                                e.target.style.color = '#374151';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (dersBasariExamType !== comp.id) {
+                                e.target.style.background = 'transparent';
+                                e.target.style.color = '#6b7280';
+                              }
+                            }}
+                          >
+                            {comp.ad}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -3050,7 +3213,7 @@ const OgrenciPanel = () => {
                       gap: 24
                     }}>
                       {Object.entries(dersBasariStats).map(([ders, stats]) => {
-                        const iconSrc = getSubjectIcon(ders);
+                        const iconSrc = getSubjectIcon(ders, allSubjects);
                         const yapildiPercent = stats.yapildiPercent;
                         const hasProgram = stats.total > 0;
                         const progressColor = hasProgram 
@@ -3299,11 +3462,9 @@ const OgrenciPanel = () => {
                           gap: 16
                         }}>
                           {Object.entries(dersDetailTopics[selectedDersForDetail])
-                            .sort((a, b) => b[1].total - a[1].total)
+                            .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                             .map(([konu, topicStats]) => {
-                              const topicPercent = topicStats.total > 0
-                                ? Math.round((topicStats.yapildi / topicStats.total) * 100)
-                                : 0;
+                              const topicPercent = topicStats.basariYuzdesi || 0;
                               const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
                               
                               return (
@@ -3361,7 +3522,7 @@ const OgrenciPanel = () => {
                                     fontSize: '14px',
                                     color: '#6b7280'
                                   }}>
-                                    <span>Çözülen: <strong style={{color: '#10b981'}}>{topicStats.yapildi}</strong></span>
+                                    <span>Çözülen: <strong style={{color: '#10b981'}}>{topicStats.totalSolved || 0}</strong></span>
                                     <span>Verilen: <strong style={{color: '#1f2937'}}>{topicStats.total}</strong></span>
                                   </div>
                                   <div style={{
@@ -3405,48 +3566,44 @@ const OgrenciPanel = () => {
                     Konu İlerlemesi
                   </h2>
                   
-                  {student?.alan?.startsWith('yks_') && (
+                  {/* Dinamik Sınav Bileşenleri Sekmeleri */}
+                  {examComponents.length > 1 && (
                     <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
-                      <button
-                        onClick={() => {
-                          setIlerlemeExamType('tyt');
-                          setSelectedDersForIlerleme(null);
-                          setKonuIlerlemesi([]);
-                        }}
-                        style={{
-                          padding: '10px 20px',
-                          borderRadius: 8,
-                          border: 'none',
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          background: ilerlemeExamType === 'tyt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                          color: ilerlemeExamType === 'tyt' ? 'white' : '#6b7280'
-                        }}
-                      >
-                        TYT
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIlerlemeExamType('ayt');
-                          setSelectedDersForIlerleme(null);
-                          setKonuIlerlemesi([]);
-                        }}
-                        style={{
-                          padding: '10px 20px',
-                          borderRadius: 8,
-                          border: 'none',
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          background: ilerlemeExamType === 'ayt' ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
-                          color: ilerlemeExamType === 'ayt' ? 'white' : '#6b7280'
-                        }}
-                      >
-                        AYT
-                      </button>
+                      {examComponents.map((comp) => (
+                        <button
+                          key={comp.id}
+                          onClick={() => {
+                            setIlerlemeExamType(comp.id);
+                            setSelectedDersForIlerleme(null);
+                            setKonuIlerlemesi([]);
+                          }}
+                          style={{
+                            padding: '10px 20px',
+                            borderRadius: 8,
+                            border: 'none',
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            background: ilerlemeExamType === comp.id ? 'linear-gradient(135deg, #6a1b9a, #8e24aa)' : 'transparent',
+                            color: ilerlemeExamType === comp.id ? 'white' : '#6b7280'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (ilerlemeExamType !== comp.id) {
+                              e.target.style.background = '#f3f4f6';
+                              e.target.style.color = '#374151';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (ilerlemeExamType !== comp.id) {
+                              e.target.style.background = 'transparent';
+                              e.target.style.color = '#6b7280';
+                            }
+                          }}
+                        >
+                          {comp.ad}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -3462,19 +3619,17 @@ const OgrenciPanel = () => {
                       gap: 16
                     }}>
                       {student && (() => {
-                        const studentArea = student.alan || 'yks_say';
-                        let studentSubjects = EXAM_SUBJECTS_BY_AREA[studentArea] || [];
+                        const selectedComp = examComponents.find(c => c.id === ilerlemeExamType);
+                        let studentSubjects = [];
                         
-                        if (studentArea.startsWith('yks_')) {
-                          if (ilerlemeExamType === 'tyt') {
-                            studentSubjects = studentSubjects.filter(s => s.startsWith('TYT '));
-                          } else if (ilerlemeExamType === 'ayt') {
-                            studentSubjects = studentSubjects.filter(s => s.startsWith('AYT '));
-                          }
+                        if (selectedComp && selectedComp.dersler) {
+                          studentSubjects = selectedComp.dersler;
+                        } else if (examComponents.length > 0) {
+                          studentSubjects = examComponents[0].dersler || [];
                         }
                         
                         return studentSubjects.map((ders) => {
-                          const iconSrc = getSubjectIcon(ders);
+                          const iconSrc = getSubjectIcon(ders, allSubjects);
                           return (
                             <div
                               key={ders}
@@ -3550,9 +3705,9 @@ const OgrenciPanel = () => {
                           Geri
                         </button>
                         <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-                          {getSubjectIcon(selectedDersForIlerleme) && (
+                          {getSubjectIcon(selectedDersForIlerleme, allSubjects) && (
                             <img
-                              src={getSubjectIcon(selectedDersForIlerleme)}
+                              src={getSubjectIcon(selectedDersForIlerleme, allSubjects)}
                               alt={selectedDersForIlerleme}
                               style={{
                                 width: 32,
@@ -3769,7 +3924,7 @@ const OgrenciPanel = () => {
                   <div>
                     <h2 style={{fontSize: 28, fontWeight: 700, margin: 0, color: '#111827'}}>Branş Denemeleri</h2>
                     <p style={{margin: '6px 0 0', color: '#6b7280'}}>
-                      {bransIsYks ? 'YKS öğrencileri için branş denemesi sonucu ekle, konu bazlı başarıyı takip et.' : 'Branş denemesi sonucu ekle, konu bazlı başarıyı takip et.'}
+                      {student?.alanName || 'Sınav'} için branş denemesi sonucu ekle, konu bazlı başarıyı takip et.
                     </p>
                   </div>
                   <div style={{display: 'flex', gap: 12}}>
@@ -3810,7 +3965,7 @@ const OgrenciPanel = () => {
                 {bransView === 'entry' ? (
                   <div style={{background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb'}}>
                     <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16, marginBottom: 20}}>
-                      {bransIsYks && (
+                      {examComponents.length > 1 && (
                         <div>
                           <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
                           <select
@@ -3823,11 +3978,12 @@ const OgrenciPanel = () => {
                             }}
                             style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', background: 'white'}}
                           >
-                            <option value="tyt">TYT</option>
-                            <option value="ayt">AYT</option>
+                            {examComponents.map(comp => (
+                              <option key={comp.id} value={comp.id}>{comp.ad}</option>
+                            ))}
                           </select>
-                                  </div>
-                                )}
+                        </div>
+                      )}
                       <div>
                         <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Ders Seçimi</label>
                         <select
@@ -4087,66 +4243,31 @@ const OgrenciPanel = () => {
                   </select>
                 </div>
 
-                {/* Ortalama Kartları - YKS için TYT/AYT, diğerleri için tek kart */}
-                {(() => {
-                  const studentAreaRaw = student?.alan || '';
-                  const studentArea = (studentAreaRaw || '').toLowerCase();
-                  const isYks = studentArea.startsWith('yks');
-
-                  if (isYks) {
-                    return (
-                      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32}}>
-                        {/* TYT Ortalama */}
-                        <div style={{
-                          background: 'white',
-                          borderRadius: 16,
-                          padding: 32,
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                          border: '1px solid #e5e7eb'
-                        }}>
-                          <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>TYT Deneme Ortalaması</div>
-                          <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
-                            {calculateGenelDenemeOrtalamalari.tytOrtalama}
-                          </div>
-                          <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                        </div>
-
-                        {/* AYT Ortalama */}
-                        <div style={{
-                          background: 'white',
-                          borderRadius: 16,
-                          padding: 32,
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                          border: '1px solid #e5e7eb'
-                        }}>
-                          <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>AYT Deneme Ortalaması</div>
-                          <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
-                            {calculateGenelDenemeOrtalamalari.aytOrtalama}
-                          </div>
-                          <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                        </div>
+                {/* Ortalama Kartları - Dinamik */}
+                <div style={{
+                  display: 'grid', 
+                  gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`, 
+                  gap: 24, 
+                  marginBottom: 32
+                }}>
+                  {examComponents.map((comp) => (
+                    <div key={comp.id} style={{
+                      background: 'white',
+                      borderRadius: 16,
+                      padding: 32,
+                      boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                      border: '1px solid #e5e7eb'
+                    }}>
+                      <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>
+                        {comp.ad} Deneme Ortalaması
                       </div>
-                    );
-                  } else {
-                    return (
-                      <div style={{display: 'grid', gridTemplateColumns: '1fr', gap: 24, marginBottom: 32, maxWidth: 600}}>
-                        <div style={{
-                          background: 'white',
-                          borderRadius: 16,
-                          padding: 32,
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                          border: '1px solid #e5e7eb'
-                        }}>
-                          <div style={{fontSize: 18, fontWeight: 600, color: '#6b7280', marginBottom: 16}}>
-                            {studentArea === 'lgs' ? 'LGS' : formatAreaLabel(studentAreaRaw)} Deneme Ortalaması
-                          </div>
-                          <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>{calculateGenelDenemeOrtalamalari.digerOrtalama}</div>
-                          <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
-                        </div>
+                      <div style={{fontSize: 72, fontWeight: 800, color: '#111827', lineHeight: 1}}>
+                        {calculateGenelDenemeOrtalamalari[comp.id] || 0}
                       </div>
-                    );
-                  }
-                })()}
+                      <div style={{fontSize: 20, fontWeight: 600, color: '#6b7280', marginTop: 8}}>Net</div>
+                    </div>
+                  ))}
+                </div>
 
                 {/* Alt Butonlar */}
                 <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20}}>
@@ -4273,28 +4394,44 @@ const OgrenciPanel = () => {
                         </button>
                       </div>
                     {(() => {
-                      const studentAreaRaw = student?.alan || '';
-                      const studentArea = (studentAreaRaw || '').toLowerCase();
-                      const isYks = studentArea.startsWith('yks');
-                      const genelDenemeDersList = studentAreaRaw ? (EXAM_SUBJECTS_BY_AREA[studentAreaRaw] || []) : [];
+                      const currentSinavTipi = genelDenemeForm.sinavTipi || (examComponents[0]?.id || 'tyt');
+                      const selectedComp = examComponents.find(c => c.id === currentSinavTipi);
+                      
+                      const filteredDersList = (() => {
+                        if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
+                          return selectedComp.dersler;
+                        }
+                        // Fallback
+                        const studentAreaRaw = student?.alan || '';
+                        const studentArea = (studentAreaRaw || '').toLowerCase();
+                        const isYks = studentArea.startsWith('yks');
+                        const fallbackDersList = getDersList(selectedQuestionExamArea);
+                        if (isYks) {
+                          return currentSinavTipi === 'tyt' 
+                            ? fallbackDersList.filter(d => d.startsWith('TYT '))
+                            : fallbackDersList.filter(d => d.startsWith('AYT '));
+                        }
+                        return fallbackDersList;
+                      })();
                       
                       return (
                         <>
                           {/* Deneme Bilgileri */}
-                          <div style={{display: 'grid', gridTemplateColumns: isYks ? '1fr 1fr 1fr' : '1fr 1fr', gap: 16, marginBottom: 24}}>
-                            {isYks && (
+                          <div style={{display: 'grid', gridTemplateColumns: examComponents.length > 1 ? '1fr 1fr 1fr' : '1fr 1fr', gap: 16, marginBottom: 24}}>
+                            {examComponents.length > 1 && (
                               <div>
                                 <label style={{display: 'block', marginBottom: 6, fontWeight: 600, color: '#4b5563'}}>Sınav Tipi</label>
                                 <select
-                                  value={genelDenemeForm.sinavTipi || 'tyt'}
+                                  value={genelDenemeForm.sinavTipi || (examComponents[0]?.id)}
                                   onChange={(e) => {
                                     setGenelDenemeForm(prev => ({ ...prev, sinavTipi: e.target.value }));
                                     setGenelDenemeDersler({});
                                   }}
                                   style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
                                 >
-                                  <option value="tyt">TYT</option>
-                                  <option value="ayt">AYT</option>
+                                  {examComponents.map(comp => (
+                                    <option key={comp.id} value={comp.id}>{comp.ad}</option>
+                                  ))}
                                 </select>
                               </div>
                             )}
@@ -4323,11 +4460,7 @@ const OgrenciPanel = () => {
                           <div style={{marginBottom: 24}}>
                             <h4 style={{fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16}}>Ders Sonuçları</h4>
                             <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16}}>
-                              {genelDenemeDersList.filter((ders) => {
-                                if (!isYks) return true; // YKS değilse tüm dersleri göster
-                                const sinavTipi = genelDenemeForm.sinavTipi || 'tyt';
-                                return sinavTipi === 'tyt' ? ders.startsWith('TYT ') : ders.startsWith('AYT ');
-                              }).map((ders) => {
+                              {filteredDersList.map((ders) => {
                                 const dersData = genelDenemeDersler[ders] || { soruSayisi: '', dogru: '', yanlis: '', bos: '', net: 0 };
                                 const net = dersData.dogru && dersData.yanlis !== '' 
                                   ? (Number(dersData.dogru) - (Number(dersData.yanlis) * 0.25)).toFixed(2)
@@ -4614,9 +4747,27 @@ const OgrenciPanel = () => {
                               >
                                 <option value="">Ders seçin</option>
                                 {(() => {
-                                  const studentArea = student?.alan || '';
-                                  const dersList = studentArea ? (EXAM_SUBJECTS_BY_AREA[studentArea] || []) : [];
-                                  return dersList.map((ders) => (
+                                  const currentSinavTipi = genelDenemeForm.sinavTipi || (examComponents[0]?.id || 'tyt');
+                                  const selectedComp = examComponents.find(c => c.id === currentSinavTipi);
+                                  
+                                  const currentDersList = (() => {
+                                    if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
+                                      return selectedComp.dersler;
+                                    }
+                                    // Fallback
+                                    const studentAreaRaw = student?.alan || '';
+                                    const studentArea = (studentAreaRaw || '').toLowerCase();
+                                    const isYks = studentArea.startsWith('yks');
+                                    const fallbackDersList = getDersList(selectedExamArea);
+                                    if (isYks) {
+                                      return currentSinavTipi === 'tyt' 
+                                        ? fallbackDersList.filter(d => d.startsWith('TYT '))
+                                        : fallbackDersList.filter(d => d.startsWith('AYT '));
+                                    }
+                                    return fallbackDersList;
+                                  })();
+
+                                  return currentDersList.map((ders) => (
                                     <option key={ders} value={ders}>{ders}</option>
                                   ));
                                 })()}
@@ -4867,19 +5018,24 @@ const OgrenciPanel = () => {
                     <>
                       {(() => {
                         const studentAreaRaw = student?.alan || '';
-                        const studentArea = (studentAreaRaw || '').toLowerCase();
-                        const isYks = studentArea.startsWith('yks');
+                        const currentSinavTipi = dersBazliGrafikSinavTipi || (examComponents[0]?.id || 'tyt');
+                        const selectedComp = examComponents.find(c => c.id === currentSinavTipi);
                         
-                        // YKS için TYT/AYT seçimi, diğerleri için direkt dersler
-                        let dersList = [];
-                        if (isYks) {
-                          const sinavTipi = dersBazliGrafikSinavTipi;
-                          dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw]?.filter(ders => 
-                            sinavTipi === 'tyt' ? ders.startsWith('TYT ') : ders.startsWith('AYT ')
-                          ) || [];
-                        } else {
-                          dersList = EXAM_SUBJECTS_BY_AREA[studentAreaRaw] || [];
-                        }
+                        const dersList = (() => {
+                          if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
+                            return selectedComp.dersler;
+                          }
+                          // Fallback
+                          const studentArea = (studentAreaRaw || '').toLowerCase();
+                          const isYks = studentArea.startsWith('yks');
+                          const fallbackDersList = getDersList(dersBasariExamType);
+                          if (isYks) {
+                            return currentSinavTipi === 'tyt' 
+                              ? fallbackDersList.filter(d => d.startsWith('TYT '))
+                              : fallbackDersList.filter(d => d.startsWith('AYT '));
+                          }
+                          return fallbackDersList;
+                        })();
                         
                         // Filtreye göre denemeleri al
                         let filteredDenemeler = [...genelDenemeList];
@@ -4905,37 +5061,26 @@ const OgrenciPanel = () => {
                         
                         return (
                           <div>
-                            {/* YKS için TYT/AYT seçimi */}
-                            {isYks && (
+                            {/* Sınav Bileşeni Seçimi */}
+                            {examComponents.length > 1 && (
                               <div style={{marginBottom: 24, display: 'flex', gap: 12}}>
-                                <button
-                                  onClick={() => setDersBazliGrafikSinavTipi('tyt')}
-                                  style={{
-                                    padding: '10px 20px',
-                                    borderRadius: 8,
-                                    border: '1px solid #d1d5db',
-                                    background: dersBazliGrafikSinavTipi === 'tyt' ? '#6a1b9a' : 'white',
-                                    color: dersBazliGrafikSinavTipi === 'tyt' ? 'white' : '#374151',
-                                    cursor: 'pointer',
-                                    fontWeight: 600
-                                  }}
-                                >
-                                  TYT
-                                </button>
-                                <button
-                                  onClick={() => setDersBazliGrafikSinavTipi('ayt')}
-                                  style={{
-                                    padding: '10px 20px',
-                                    borderRadius: 8,
-                                    border: '1px solid #d1d5db',
-                                    background: dersBazliGrafikSinavTipi === 'ayt' ? '#6a1b9a' : 'white',
-                                    color: dersBazliGrafikSinavTipi === 'ayt' ? 'white' : '#374151',
-                                    cursor: 'pointer',
-                                    fontWeight: 600
-                                  }}
-                                >
-                                  AYT
-                                </button>
+                                {examComponents.map(comp => (
+                                  <button
+                                    key={comp.id}
+                                    onClick={() => setDersBazliGrafikSinavTipi(comp.id)}
+                                    style={{
+                                      padding: '10px 20px',
+                                      borderRadius: 8,
+                                      border: '1px solid #d1d5db',
+                                      background: currentSinavTipi === comp.id ? '#6a1b9a' : 'white',
+                                      color: currentSinavTipi === comp.id ? 'white' : '#374151',
+                                      cursor: 'pointer',
+                                      fontWeight: 600
+                                    }}
+                                  >
+                                    {comp.ad}
+                                  </button>
+                                ))}
                               </div>
                             )}
                             

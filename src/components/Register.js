@@ -10,7 +10,7 @@ const roles = [
 ];
 
 export default function Register() {
-  const API_BASE = process.env.REACT_APP_API_URL || 'https://vedatdaglarmuhendislik.com.tr';
+  const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
   const [selectedRole, setSelectedRole] = useState('ogretmen');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -34,13 +34,21 @@ export default function Register() {
       // Geçici debug
       // eslint-disable-next-line no-console
       console.log('REGISTER payload', payload);
-      const res = await fetch(`${API_BASE}/api/register.php`, {
+      const res = await fetch(`${API_BASE}/php-backend/api/register.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ message: 'Kayıt başarısız' }));
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error('Register JSON Parse Error:', e, 'Raw:', text);
+        throw new Error('Sunucudan geçersiz yanıt alındı');
+      }
+
+      if (!res.ok || !data.success) {
         console.error('Register Error:', data);
         const missing = data && Array.isArray(data.missing) ? ` (Eksik: ${data.missing.join(', ')})` : '';
         throw new Error((data.message || 'Kayıt başarısız') + missing);
@@ -94,13 +102,13 @@ export default function Register() {
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <div className="form-group" style={{ flex: 1 }}>
+            <div className="form-group">
               <label htmlFor="password">Şifre:</label>
-              <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" required />
+              <input type="password" id="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" required />
             </div>
-            <div className="form-group" style={{ flex: 1 }}>
+            <div className="form-group">
               <label htmlFor="password2">Şifre (Tekrar):</label>
-              <input type="password" id="password2" value={password2} onChange={(e) => setPassword2(e.target.value)} placeholder="********" required />
+              <input type="password" id="password2" autoComplete="new-password" value={password2} onChange={(e) => setPassword2(e.target.value)} placeholder="********" required />
             </div>
           </div>
 
@@ -114,5 +122,3 @@ export default function Register() {
     </div>
   );
 }
-
-

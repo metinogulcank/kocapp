@@ -10,6 +10,7 @@ import OgrenciPanel from './components/OgrenciPanel';
 import OgrenciAiPanel from './components/OgrenciAiPanel';
 import VeliPanel from './components/VeliPanel';
 import './App.css';
+import AdminDashboard from './components/AdminDashboard';
 
 const OgrenciAiPanelWrapper = () => {
   const { studentId } = useParams();
@@ -46,6 +47,7 @@ function App() {
           <Route path="/ogrenci-panel" element={<OgrenciPanel />} />
           <Route path="/ogrenci-ai/:studentId" element={<OgrenciAiPanelWrapper />} />
           <Route path="/veli-panel" element={<VeliPanel />} />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Routes>
       </div>
     </Router>

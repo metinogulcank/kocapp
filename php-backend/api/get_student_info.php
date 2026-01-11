@@ -45,22 +45,64 @@ try {
         exit;
     }
 
+    // Alan adını çöz (Dinamik sınav/bileşen yapısı için)
+    $alanName = $student['alan'];
+    if (strpos($student['alan'], 'comp_') === 0) {
+        $compId = str_replace('comp_', '', $student['alan']);
+        // Daha garantici bir sorgu: COLLATE'i kaldırıp ham karşılaştırma yapalım, ama hata ihtimaline karşı try-catch ekleyelim
+        try {
+            $stmtAlan = $db->prepare("
+                SELECT b.ad as b_ad, s.ad as s_ad 
+                FROM sinav_bilesenleri b 
+                JOIN sinavlar s ON b.sinav_id = s.id 
+                WHERE b.id = ?
+            ");
+            $stmtAlan->execute([$compId]);
+            $alanData = $stmtAlan->fetch(PDO::FETCH_ASSOC);
+            if ($alanData) {
+                $alanName = $alanData['s_ad'] . " - " . $alanData['b_ad'];
+            } else {
+                // Eğer bilesenlerde yoksa sadece sinav adını bulmaya çalış (yedek)
+                $stmtBackup = $db->prepare("SELECT ad FROM sinavlar WHERE id = (SELECT sinav_id FROM sinav_bilesenleri WHERE id = ?)");
+                $stmtBackup->execute([$compId]);
+                $backupAd = $stmtBackup->fetchColumn();
+                if ($backupAd) $alanName = $backupAd;
+            }
+        } catch (Exception $e) {
+            // Hata durumunda COLLATE ile tekrar dene
+            $stmtAlan = $db->prepare("
+                SELECT b.ad as b_ad, s.ad as s_ad 
+                FROM sinav_bilesenleri b 
+                JOIN sinavlar s ON b.sinav_id COLLATE utf8mb4_general_ci = s.id COLLATE utf8mb4_general_ci 
+                WHERE b.id COLLATE utf8mb4_general_ci = ?
+            ");
+            $stmtAlan->execute([$compId]);
+            $alanData = $stmtAlan->fetch(PDO::FETCH_ASSOC);
+            if ($alanData) {
+                $alanName = $alanData['s_ad'] . " - " . $alanData['b_ad'];
+            }
+        }
+    } elseif (strpos($student['alan'], 'exam_') === 0) {
+        $examId = str_replace('exam_', '', $student['alan']);
+        try {
+            $stmtAlan = $db->prepare("SELECT ad FROM sinavlar WHERE id = ?");
+            $stmtAlan->execute([$examId]);
+            $alanName = $stmtAlan->fetchColumn() ?: $student['alan'];
+        } catch (Exception $e) {
+            $stmtAlan = $db->prepare("SELECT ad FROM sinavlar WHERE id COLLATE utf8mb4_general_ci = ?");
+            $stmtAlan->execute([$examId]);
+            $alanName = $stmtAlan->fetchColumn() ?: $student['alan'];
+        }
+    }
+
+    $student['alanName'] = $alanName;
+    $student['alan_debug'] = $student['alan'];
+
     echo json_encode([
         'success' => true,
-        'student' => [
-            'id' => $student['id'],
-            'firstName' => $student['firstName'],
-            'lastName' => $student['lastName'],
-            'email' => $student['email'],
-            'phone' => $student['phone'],
-            'className' => $student['className'],
-            'alan' => $student['alan'],
-            'profilePhoto' => $student['profilePhoto'],
-            'meetingDay' => $student['meetingDay'],
-            'meetingDate' => $student['meetingDate'],
-            'sinavTarihi' => $student['sinav_tarihi'],
-            'onlineStatus' => $student['online_status'] ?? 0,
-            'sonGirisTarihi' => $student['son_giris_tarihi']
+        'student' => $student,
+        'debug_info' => [
+            'timestamp' => date('Y-m-d H:i:s')
         ]
     ]);
 

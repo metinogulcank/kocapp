@@ -107,7 +107,7 @@ if (!empty($profilePhoto) && strpos($profilePhoto, '/students/temp_') !== false)
                 }
                 
                 // Yeni URL'yi oluştur
-                $profilePhoto = 'https://vedatdaglarmuhendislik.com.tr/uploads/students/' . $id . '/' . $fileName;
+                $profilePhoto = 'https://kocapp.com/uploads/students/' . $id . '/' . $fileName;
             }
         }
     }

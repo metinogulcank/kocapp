@@ -9,8 +9,8 @@
 - **SSL** sertifikası (Let's Encrypt)
 
 ### 2. Domain ve Hosting
-- **Ana Domain**: `vedatdaglarmuhendislik.com.tr`
-- **API Subdomain**: `api.vedatdaglarmuhendislik.com.tr`
+- **Ana Domain**: `kocapp.com`
+- **API Subdomain**: `api.kocapp.com`
 - cPanel hosting hesabınızda Node.js uygulaması oluşturun
 
 ## 🔧 Frontend Deployment (React)
@@ -87,7 +87,7 @@ pm2 save
 3. **Node.js Version**: 16.x veya üzeri
 4. **Application Mode**: Production
 5. **Application Root**: `/home/username/kocapp-server`
-6. **Application URL**: `api.vedatdaglarmuhendislik.com.tr` (subdomain)
+6. **Application URL**: `api.kocapp.com` (subdomain)
 7. **Application Startup File**: `src/index.js`
 
 ### 2. Environment Variables
@@ -106,7 +106,7 @@ cPanel Node.js uygulamasında:
 ```apache
 # API istekleri için backend'e yönlendirme
 RewriteCond %{REQUEST_URI} ^/api/(.*)$
-RewriteRule ^api/(.*)$ https://api.vedatdaglarmuhendislik.com.tr:5000/api/$1 [P,L]
+RewriteRule ^api/(.*)$ https://api.kocapp.com:5000/api/$1 [P,L]
 ```
 
 ## 📊 Monitoring ve Logs

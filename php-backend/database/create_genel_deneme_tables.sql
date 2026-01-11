@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS genel_denemeler (
     deneme_adi VARCHAR(255) NOT NULL,
     deneme_tarihi DATE NOT NULL,
     notlar TEXT DEFAULT NULL,
-    sinav_tipi VARCHAR(10) DEFAULT 'tyt',
+    sinav_tipi CHAR(24) DEFAULT 'tyt',
     olusturma_tarihi DATETIME DEFAULT CURRENT_TIMESTAMP,
     guncelleme_tarihi DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_genel_student (student_id),

@@ -39,10 +39,18 @@ if(!empty($data->email) && !empty($data->password)) {
                 'firstName' => $user->firstName,
                 'lastName' => $user->lastName
             );
+
+            try {
+                $updateUser = "UPDATE users SET updatedAt = NOW() WHERE _id = ?";
+                $updateStmt = $db->prepare($updateUser);
+                $updateStmt->execute([$user->id]);
+            } catch (Exception $e) {
+                // Hata olsa bile login devam etsin
+                error_log("User updatedAt update error: " . $e->getMessage());
+            }
         }
     }
     
-    // Eğer users tablosunda bulunamadıysa, ogrenciler tablosunda ara
     if(!$foundUser) {
         $query = "SELECT id, firstName, lastName, email, passwordHash FROM ogrenciler WHERE email = ? LIMIT 1";
         $stmt = $db->prepare($query);

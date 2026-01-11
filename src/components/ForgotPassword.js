@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import './Login.css';
 
 export default function ForgotPassword() {
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -12,7 +12,7 @@ export default function ForgotPassword() {
     setError('');
     setStatus('');
     try {
-      const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+      const res = await fetch(`${API_BASE}/php-backend/api/auth/forgot-password.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -44,5 +44,4 @@ export default function ForgotPassword() {
     </div>
   );
 }
-
 

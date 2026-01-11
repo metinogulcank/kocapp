@@ -1,6 +1,6 @@
 -- Mevcut genel_denemeler tablosuna sinav_tipi kolonu ekle
 ALTER TABLE genel_denemeler 
-ADD COLUMN sinav_tipi VARCHAR(10) DEFAULT 'tyt' AFTER notlar;
+ADD COLUMN sinav_tipi CHAR(24) DEFAULT 'tyt' AFTER notlar;
 
 -- İndeks ekle (opsiyonel, performans için)
 ALTER TABLE genel_denemeler 

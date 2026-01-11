@@ -104,10 +104,10 @@ if ($type === 'student') {
     if (file_exists($filePath)) {
         copy($filePath, $studentFilePath);
     }
-    $url = 'https://vedatdaglarmuhendislik.com.tr/uploads/students/' . $userId . '/' . $fileName;
+    $url = 'https://kocapp.com/uploads/students/' . $userId . '/' . $fileName;
 } else {
     // Öğretmen fotoğrafları için
-    $url = 'https://vedatdaglarmuhendislik.com.tr/uploads/' . $userId . '/' . $fileName;
+    $url = 'https://kocapp.com/uploads/' . $userId . '/' . $fileName;
 }
 
 echo json_encode([
