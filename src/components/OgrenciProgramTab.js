@@ -397,7 +397,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     soruSayisi: '',
     baslangicSaati: '',
     bitisSaati: '',
-    etutSuresi: loadStoredEtutDuration(teacherId)
+    etutSuresi: loadStoredEtutDuration(teacherId),
+    isManualKonu: false
   });
 
   const subjectColorMapRef = useRef({});
@@ -694,11 +695,21 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   }, [showTopicAnalysisModal, studentSubjects, topicAnalysisSubject]);
 
   const preferredWeekStart = useMemo(() => {
-    const raw =
+    let raw =
       student?.meetingDay ??
       student?.meeting_day ??
       student?.gorusmeGunu ??
       student?.gorusme_gunu;
+
+    // Eğer explicit gün yoksa ama meetingDate varsa, onun gününü kullan
+    if (!raw && (student?.meetingDate || student?.meeting_date)) {
+      const d = new Date(student?.meetingDate || student?.meeting_date);
+      if (!Number.isNaN(d.getTime())) {
+        const jsDay = d.getDay();
+        raw = jsDay === 0 ? 7 : jsDay;
+      }
+    }
+
     const parsed = parseInt(raw, 10);
     if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 7) {
       return parsed;
@@ -706,44 +717,25 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     return 1;
   }, [student]);
 
-  // Öğrencinin görüşme tarihi (varsa tam tarih)
-  const meetingStartDate = useMemo(() => {
-    const raw = student?.meetingDate ?? student?.meeting_date ?? null;
-    if (!raw) return null;
-    const d = new Date(raw);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }, [student]);
-
-  // Öğrenci değiştiğinde haftayı görüşme tarihine hizala
+  // Öğrenci değiştiğinde haftayı bugüne hizala
   useEffect(() => {
-    if (meetingStartDate) {
-      setCurrentWeek(meetingStartDate);
-    } else {
-      setCurrentWeek(new Date());
-    }
-  }, [meetingStartDate, student?.id]);
+    setCurrentWeek(new Date());
+  }, [student?.id]);
 
   // Haftanın günlerini hesapla (öğrencinin görüşme gününü baz alarak)
   const weekDays = useMemo(() => {
     const startOfWeek = new Date(currentWeek);
     startOfWeek.setHours(0, 0, 0, 0);
 
-    // Eğer tam görüşme tarihi varsa, haftayı doğrudan o günden başlat
-    if (meetingStartDate) {
-      const base = new Date(startOfWeek);
-      const days = [];
-      for (let i = 0; i < 7; i++) {
-        const date = new Date(base);
-        date.setDate(base.getDate() + i);
-        days.push(date);
-      }
-      return days;
-    }
-
-    // Aksi halde, tercih edilen haftabaşı gününe (örneğin Pazartesi) hizala
+    // Tercih edilen haftabaşı gününe (örneğin Pazartesi) hizala
     const currentJsDay = startOfWeek.getDay() === 0 ? 7 : startOfWeek.getDay();
-    const diff = preferredWeekStart - currentJsDay;
-    startOfWeek.setDate(startOfWeek.getDate() + diff);
+    
+    // Calculate how many days we need to go BACK to hit the most recent preferredWeekStart
+    // This uses modulo arithmetic to ensure we always go back 0-6 days
+    // (current - target + 7) % 7 gives the distance backwards
+    const daysToGoBack = (currentJsDay - preferredWeekStart + 7) % 7;
+    
+    startOfWeek.setDate(startOfWeek.getDate() - daysToGoBack);
     
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -752,7 +744,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       days.push(date);
     }
     return days;
-  }, [currentWeek, preferredWeekStart, meetingStartDate]);
+  }, [currentWeek, preferredWeekStart]);
 
   const weekStartIso = useMemo(() => {
     if (!weekDays.length) return null;
@@ -767,7 +759,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     if (effectiveStudentId) {
       fetchStudentProgram();
     }
-  }, [effectiveStudentId, currentWeek]);
+  }, [effectiveStudentId, currentWeek, weekDays]);
 
   // Şablonları yükle
   useEffect(() => {
@@ -966,6 +958,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       const b = currentInputs.bos !== undefined && currentInputs.bos !== '' ? parseInt(currentInputs.bos) || 0 : originalInputs.bos;
       const toplam = (d || 0) + (y || 0) + (b || 0);
       if (toplam === 0) {
+        alert('Doğru/yanlış/bos girmeden Yapıldı işaretlenemez.');
         setValidationPopup({ visible: true, message: 'Veri girin' });
         setShakeStatusProgramId(prog.id);
         setTimeout(() => setShakeStatusProgramId(null), 700);
@@ -1024,7 +1017,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
-      etutSuresi: defaultEtutDuration
+      etutSuresi: defaultEtutDuration,
+      isManualKonu: false
     });
   };
 
@@ -1059,7 +1053,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
-      etutSuresi: defaultEtutDuration
+      etutSuresi: defaultEtutDuration,
+      isManualKonu: false
     });
   };
 
@@ -1213,7 +1208,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       soruSayisi: program.soru_sayisi || '',
       baslangicSaati: startTime,
       bitisSaati: endTime,
-      etutSuresi: programDuration
+      etutSuresi: programDuration,
+      isManualKonu: false
     });
     
     // Konuları çek
@@ -1235,7 +1231,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
-      etutSuresi: defaultEtutDuration
+      etutSuresi: defaultEtutDuration,
+      isManualKonu: false
     });
   };
 
@@ -2801,7 +2798,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
           {weekDays.map((day, index) => {
             const dayPrograms = getDayPrograms(day);
             const totalPrograms = dayPrograms.length;
-            const completedPrograms = dayPrograms.filter(p => p.durum === 'yapildi').length;
+            const completedPrograms = dayPrograms.filter(p => calculateStatus(p) === 'yapildi').length;
             
             // Pasta grafiği için yüzde hesaplama
             const completedPercent = totalPrograms > 0 ? (completedPrograms / totalPrograms) * 100 : 0;
@@ -2947,30 +2944,39 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                 <div className="inline-form-group">
                                 <label>Konu</label>
                                 {(dynamicTopics.length > 0 || isKonuLoading) ? (
-                                  <select
-                                    value={programForm.konu}
-                                    onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
-                                  >
-                                    <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
-                                    {dynamicTopics.map((topic, index) => (
-                                      <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
-                                    ))}
-                                    {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
-                                  </select>
+                                  <>
+                                    <select
+                                      value={(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) ? 'other' : programForm.konu}
+                                      onChange={(e) => {
+                                        if (e.target.value === 'other') {
+                                          setProgramForm({ ...programForm, isManualKonu: true, konu: '' });
+                                        } else {
+                                          setProgramForm({ ...programForm, isManualKonu: false, konu: e.target.value });
+                                        }
+                                      }}
+                                    >
+                                      <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
+                                      {dynamicTopics.map((topic, index) => (
+                                        <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                                      ))}
+                                      {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
+                                    </select>
+                                    {(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) && (
+                                      <input
+                                        type="text"
+                                        style={{marginTop: 8}}
+                                        placeholder="Konu adını giriniz"
+                                        value={programForm.konu}
+                                        onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                                      />
+                                    )}
+                                  </>
                                 ) : (
                                     <input
                                       type="text"
                                       value={programForm.konu}
                                       onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                                       placeholder={isKonuLoading ? 'Yükleniyor...' : "Örn: Türev"}
-                                    />
-                                  )}
-                                  {programForm.konu === 'other' && (
-                                    <input
-                                      type="text"
-                                      style={{marginTop: 8}}
-                                      placeholder="Konu adını giriniz"
-                                      onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                                     />
                                   )}
                                 </div>
@@ -3372,30 +3378,39 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                             <div className="inline-form-group">
                               <label>Konu</label>
                               {(dynamicTopics.length > 0 || isKonuLoading) ? (
-                                <select
-                                  value={programForm.konu}
-                                  onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
-                                >
-                                  <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
-                                  {dynamicTopics.map((topic, index) => (
-                                    <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
-                                  ))}
-                                  {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
-                                </select>
+                                <>
+                                  <select
+                                    value={(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) ? 'other' : programForm.konu}
+                                    onChange={(e) => {
+                                      if (e.target.value === 'other') {
+                                        setProgramForm({ ...programForm, isManualKonu: true, konu: '' });
+                                      } else {
+                                        setProgramForm({ ...programForm, isManualKonu: false, konu: e.target.value });
+                                      }
+                                    }}
+                                  >
+                                    <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
+                                    {dynamicTopics.map((topic, index) => (
+                                      <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                                    ))}
+                                    {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
+                                  </select>
+                                  {(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) && (
+                                    <input
+                                      type="text"
+                                      style={{marginTop: 8}}
+                                      placeholder="Konu adını giriniz"
+                                      value={programForm.konu}
+                                      onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                                    />
+                                  )}
+                                </>
                               ) : (
                                 <input
                                   type="text"
                                   value={programForm.konu}
                                   onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                                   placeholder={isKonuLoading ? 'Yükleniyor...' : "Örn: Türev"}
-                                />
-                              )}
-                              {programForm.konu === 'other' && (
-                                <input
-                                  type="text"
-                                  style={{marginTop: 8}}
-                                  placeholder="Konu adını giriniz"
-                                  onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                                 />
                               )}
                             </div>
@@ -4198,7 +4213,8 @@ const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) =>
     soruSayisi: '',
     baslangicSaati: '',
     bitisSaati: '',
-    etutSuresi: templateDefaultEtutDuration
+    etutSuresi: templateDefaultEtutDuration,
+    isManualKonu: false
   });
 
   // Dinamik dersleri çek
@@ -4304,7 +4320,8 @@ const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) =>
       soruSayisi: '',
       baslangicSaati: '',
       bitisSaati: '',
-      etutSuresi: templateDefaultEtutDuration
+      etutSuresi: templateDefaultEtutDuration,
+      isManualKonu: false
     });
   };
 
@@ -4597,30 +4614,39 @@ const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) =>
                 <div className="form-group">
                   <label>Konu</label>
                   {(dynamicTopics.length > 0 || isKonuLoading) ? (
-                    <select
-                      value={programForm.konu}
-                      onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
-                    >
-                      <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
-                      {dynamicTopics.map((topic, index) => (
-                        <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
-                      ))}
-                      {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
-                    </select>
+                    <>
+                      <select
+                        value={(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) ? 'other' : programForm.konu}
+                        onChange={(e) => {
+                          if (e.target.value === 'other') {
+                            setProgramForm({ ...programForm, isManualKonu: true, konu: '' });
+                          } else {
+                            setProgramForm({ ...programForm, isManualKonu: false, konu: e.target.value });
+                          }
+                        }}
+                      >
+                        <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
+                        {dynamicTopics.map((topic, index) => (
+                          <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                        ))}
+                        {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
+                      </select>
+                      {(programForm.isManualKonu || (programForm.konu && !dynamicTopics.some(t => t.konu_adi === programForm.konu))) && (
+                        <input
+                          type="text"
+                          style={{marginTop: 8}}
+                          placeholder="Konu adını giriniz"
+                          value={programForm.konu}
+                          onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
+                        />
+                      )}
+                    </>
                   ) : (
                     <input
                       type="text"
                       value={programForm.konu}
                       onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                       placeholder={isKonuLoading ? 'Yükleniyor...' : "Örn: Türev"}
-                    />
-                  )}
-                  {programForm.konu === 'other' && (
-                    <input
-                      type="text"
-                      style={{marginTop: 8}}
-                      placeholder="Konu adını giriniz"
-                      onChange={(e) => setProgramForm({ ...programForm, konu: e.target.value })}
                     />
                   )}
                 </div>

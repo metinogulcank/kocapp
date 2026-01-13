@@ -334,7 +334,7 @@ const MEETING_DAY_OPTIONS = [
         gender: student.gender || 'm', // Varsayılan olarak 'm', backend'den gelebilir
         className: student.class || student.className || 'Belirtilmemiş',
         registeredAt: student.registeredAt || new Date().toISOString().split('T')[0],
-        overdueCount: student.overdueCount || 0, // Backend'den gelebilir
+        overdueCount: student.overdue !== undefined ? student.overdue : (student.overdueCount || 0),
         lastPayment: student.lastPayment || new Date().toISOString().split('T')[0], // Backend'den gelebilir
         history: student.history || [], // Backend'den gelebilir
         meetingDay: student.meetingDay || 1
@@ -596,16 +596,24 @@ const MEETING_DAY_OPTIONS = [
       const today = new Date();
       const dayOfWeek = today.getDay();
       const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-      const weekStart = new Date(today.setDate(diff));
+      const weekStart = new Date(today);
+      weekStart.setDate(diff);
       weekStart.setHours(0, 0, 0, 0);
 
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
 
-      const startDateStr = weekStart.toISOString().split('T')[0];
-      const endDateStr = weekEnd.toISOString().split('T')[0];
-      const todayStr = today.toISOString().split('T')[0];
+      // Yerel saat dilimine göre tarih stringi oluştur (YYYY-MM-DD)
+      const toLocalISOString = (date) => {
+        const offset = date.getTimezoneOffset();
+        const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+        return localDate.toISOString().split('T')[0];
+      };
+
+      const startDateStr = toLocalISOString(weekStart);
+      const endDateStr = toLocalISOString(weekEnd);
+      const todayStr = toLocalISOString(today);
 
       const updated = await Promise.all(
         studentList.map(async (stu) => {
@@ -617,16 +625,33 @@ const MEETING_DAY_OPTIONS = [
               let yapilan = 0;
               let yapilmayan = 0;
               let toplam = 0;
-              let bugunYapilmayan = 0; // Sadece bugün için zamanı geçen etüt
+              let bugunYapilmayan = 0; // Zamanı geçen etütler (Bugün ve öncesi)
 
               data.programs.forEach((prog) => {
                 toplam++;
-                if (prog.durum === 'yapildi') {
+                const rawStatus = String(prog.durum || prog.status || '').toLowerCase();
+                const status = rawStatus.replace(/ı/g, 'i');
+                if (status === 'yapildi') {
                   yapilan++;
                 } else {
                   yapilmayan++;
-                  // Sadece bugün için zamanı geçen etütleri say
+                  let isOverdue = false;
+                  
                   if (prog.tarih === todayStr) {
+                    // Bugün için saat kontrolü
+                    if (prog.bitis_saati) {
+                      const now = new Date();
+                      const [hours, minutes] = prog.bitis_saati.split(':').map(Number);
+                      const progEnd = new Date();
+                      progEnd.setHours(hours, minutes, 0, 0);
+                      
+                      if (now > progEnd) {
+                        isOverdue = true;
+                      }
+                    }
+                  }
+
+                  if (isOverdue) {
                     bugunYapilmayan++;
                   }
                 }
@@ -636,7 +661,7 @@ const MEETING_DAY_OPTIONS = [
 
               return {
                 ...stu,
-                overdue: bugunYapilmayan, // Sadece bugün için zamanı geçen etüt
+                overdue: bugunYapilmayan,
                 completed: completedPct
               };
             }

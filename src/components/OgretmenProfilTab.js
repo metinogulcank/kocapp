@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faChevronLeft, faChevronRight, faTimes } from '@fortawesome/free-solid-svg-icons';
 
 const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
 const API_GET = `${API_BASE}/php-backend/api/get_teacher_profile.php`;
@@ -9,6 +11,8 @@ const API_STUDENT = `${API_BASE}/php-backend/api/create_student.php`;
 const API_UPDATE_STUDENT = `${API_BASE}/php-backend/api/update_student.php`;
 const API_DELETE_STUDENT = `${API_BASE}/php-backend/api/delete_student.php`;
 const API_GET_STUDENTS = `${API_BASE}/php-backend/api/get_teacher_students.php`;
+const API_CREATE_APPT = `${API_BASE}/php-backend/api/create_appointment.php`;
+const API_GET_APPTS = `${API_BASE}/php-backend/api/get_appointments.php`;
 
 const safeFetchJson = async (url, options = {}) => {
   try {
@@ -58,13 +62,22 @@ export default function OgretmenProfilTab() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [modal, setModal] = useState(false);
-  const [selectedDay, setSelectedDay] = useState(null);
-  const appointments = useMemo(() => ({
-    3: { student: 'Zeynep Y.', time: '14:00' },
-    7: { student: 'Ahmet K.', time: '10:30' },
-    18: { student: 'Elif K.', time: '16:15' }
-  }), []);
-
+  
+  // Randevu Sistemi State
+  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [appointmentForm, setAppointmentForm] = useState({
+    studentId: '',
+    date: '',
+    time: '',
+    subject: ''
+  });
+  const [creatingAppt, setCreatingAppt] = useState(false);
+  const [apptError, setApptError] = useState('');
+  const [apptSuccess, setApptSuccess] = useState('');
+  const [realAppointments, setRealAppointments] = useState([]);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedApptDetail, setSelectedApptDetail] = useState(null); // Popup için
+  
   // Yeni öğrenci ekleme için state
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [studentForm, setStudentForm] = useState({
@@ -75,7 +88,6 @@ export default function OgretmenProfilTab() {
     phone: '',
     className: '',
     profilePhoto: '',
-    // Öğrencinin ilk görüşme / başlangıç tarihi
     meetingDate: '',
     password: '',
     passwordConfirm: ''
@@ -139,7 +151,73 @@ export default function OgretmenProfilTab() {
         setError('Profil yüklenemedi');
         setLoading(false);
       });
+      
+    // Randevuları çek
+    fetchAppointments(user.id);
+    // Öğrencileri de çek (select box için)
+    fetchStudents(user.id);
+
   }, []);
+
+  const fetchAppointments = async (teacherId) => {
+    const tid = teacherId || (JSON.parse(localStorage.getItem('user'))?.id);
+    if(!tid) return;
+    
+    try {
+        const data = await safeFetchJson(`${API_GET_APPTS}?teacher_id=${tid}`);
+        if(data.success) {
+            setRealAppointments(data.appointments);
+        }
+    } catch(e) {
+        console.error("Randevular çekilemedi", e);
+    }
+  };
+
+  const handleCreateAppointment = async (e) => {
+    e.preventDefault();
+    setApptError('');
+    setApptSuccess('');
+    
+    if(!appointmentForm.studentId || !appointmentForm.date || !appointmentForm.time || !appointmentForm.subject) {
+        setApptError("Lütfen tüm alanları doldurun.");
+        return;
+    }
+
+    setCreatingAppt(true);
+    const user = JSON.parse(localStorage.getItem('user'));
+    
+    try {
+        const payload = {
+        teacher_id: user.id,
+        student_id: appointmentForm.studentId,
+        date: appointmentForm.date,
+        time: appointmentForm.time,
+        subject: appointmentForm.subject
+    };
+        
+        const data = await safeFetchJson(API_CREATE_APPT, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        
+        if(data.success) {
+            setApptSuccess(data.message);
+            setAppointmentForm({ studentId: '', date: '', time: '', subject: '' });
+            fetchAppointments(user.id);
+            setTimeout(() => {
+                setShowAppointmentModal(false);
+                setApptSuccess('');
+            }, 1500);
+        } else {
+            setApptError(data.message || "Bir hata oluştu.");
+        }
+    } catch(err) {
+        setApptError(err.message);
+    } finally {
+        setCreatingAppt(false);
+    }
+  };
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -180,9 +258,8 @@ export default function OgretmenProfilTab() {
     const user = JSON.parse(localStorage.getItem('user'));
     const formData = new FormData();
     formData.append('photo', file);
-    // Öğrenci fotoğrafları için geçici ID kullan (öğrenci henüz oluşturulmadı)
     formData.append('_id', 'temp_' + Date.now());
-    formData.append('type', 'student'); // Öğrenci fotoğrafı olduğunu belirt
+    formData.append('type', 'student');
     try {
       const data = await safeFetchJson(API_PHOTO, { method: 'POST', body: formData });
       if (!data.success || !data.url) throw new Error(data.message || 'Yükleme hatası!');
@@ -233,7 +310,6 @@ export default function OgretmenProfilTab() {
         passwordConfirm: ''
       });
       setShowAddStudentModal(false);
-      // Öğrenci listesini yenile
       if (showStudentListModal) {
         fetchStudents();
       }
@@ -244,11 +320,13 @@ export default function OgretmenProfilTab() {
   }
 
   // Öğrencileri getir
-  const fetchStudents = () => {
+  const fetchStudents = (tid) => {
     const user = JSON.parse(localStorage.getItem('user'));
-    if (!user || !user.id) return;
+    const teacherId = tid || user?.id;
+    if (!teacherId) return;
+    
     setStudentsLoading(true);
-    safeFetchJson(`${API_GET_STUDENTS}?teacherId=${user.id}`)
+    safeFetchJson(`${API_GET_STUDENTS}?teacherId=${teacherId}`)
       .then(data => {
         if (data.students) {
           setStudents(data.students);
@@ -261,13 +339,11 @@ export default function OgretmenProfilTab() {
       });
   };
 
-  // Öğrenci listesi modalını aç
   const handleOpenStudentList = () => {
     setShowStudentListModal(true);
     fetchStudents();
   };
 
-  // Öğrenci düzenleme modalını aç
   const handleEditStudent = (student) => {
     setEditingStudent(student);
     setEditStudentForm({
@@ -288,13 +364,11 @@ export default function OgretmenProfilTab() {
     setUpdateSuccess('');
   };
 
-  // Öğrenci düzenleme form değişikliği
   function handleEditStudentFormChange(e) {
     const { name, value } = e.target;
     setEditStudentForm(f => ({ ...f, [name]: value }));
   }
 
-  // Öğrenci düzenleme fotoğraf yükleme
   async function handleEditStudentPhotoUpload(e) {
     setEditStuUploading(true); setUpdateError(''); setUpdateSuccess('');
     const file = e.target.files[0]; if (!file) return;
@@ -312,7 +386,6 @@ export default function OgretmenProfilTab() {
     } finally { setEditStuUploading(false); }
   }
 
-  // Öğrenci güncelleme
   async function handleUpdateStudent(e) {
     e.preventDefault();
     setUpdateError(''); setUpdateSuccess('');
@@ -339,7 +412,6 @@ export default function OgretmenProfilTab() {
       profilePhoto: editStudentForm.profilePhoto,
       meetingDate: editStudentForm.meetingDate || null
     };
-    // Şifre sadece değiştirilmişse ekle
     if (editStudentForm.password) {
       payload.password = editStudentForm.password;
     }
@@ -362,7 +434,6 @@ export default function OgretmenProfilTab() {
     setUpdating(false);
   }
 
-  // Öğrenci silme
   const handleDeleteStudent = async (studentId) => {
     if (!window.confirm('Bu öğrenciyi silmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) {
       return;
@@ -406,9 +477,71 @@ export default function OgretmenProfilTab() {
       setError(err.message);
     } finally { setSaving(false); }
   }
+
+  // Takvim Yardımcıları
+  const getDaysInMonth = (year, month) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+  
+  const getMonthName = (monthIndex) => {
+    const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    return months[monthIndex];
+  };
+
+  const handlePrevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  };
+
+  const renderCalendar = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = getDaysInMonth(year, month);
+    const firstDay = new Date(year, month, 1).getDay(); // 0=Sun, 1=Mon
+    
+    // Pazartesi'den başlasın diye kaydırma (TR usulü)
+    // 0(Pazar) -> 6, 1(Pazartesi) -> 0
+    const startOffset = firstDay === 0 ? 6 : firstDay - 1;
+
+    const days = [];
+    // Boş kutular
+    for(let i=0; i<startOffset; i++) {
+        days.push(<div key={`empty-${i}`} className="cal-cell empty"></div>);
+    }
+
+    // Günler
+    for(let d=1; d<=daysInMonth; d++) {
+        // Bu günde randevu var mı?
+        const dateStr = `${year}-${String(month+1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const dayAppts = realAppointments.filter(a => a.date === dateStr);
+        const hasAppt = dayAppts.length > 0;
+        
+        days.push(
+            <button 
+                key={d} 
+                className={`cal-cell ${hasAppt ? 'has-appt' : ''}`}
+                onClick={() => {
+                    if(hasAppt) {
+                        setSelectedApptDetail({
+                            date: dateStr,
+                            appointments: dayAppts
+                        });
+                    }
+                }}
+            >
+                <span className="num">{d}</span>
+                {hasAppt && <span className="tick" style={{backgroundColor: '#ef4444'}}></span>}
+            </button>
+        );
+    }
+    return days;
+  };
+
   if (loading) return <div className="profile-tab">Yükleniyor...</div>;
 
-  // Modern üst Profile Card
   return (
     <div className="profile-tab">
       <div className="profile-card-modern">
@@ -438,7 +571,6 @@ export default function OgretmenProfilTab() {
         </div>
       </div>
 
-      {/* Öğrenci yeni ekle kutucuğu */}
       <div className="dashboard-tiles">
         <div className="tile">
           <div className="tile-title">Abonelik bitiş süresi</div>
@@ -449,7 +581,10 @@ export default function OgretmenProfilTab() {
           <div className="tile-value"><span className="highlight">{form.limit}/{form.active}</span></div>
           <div className="tile-sub">Öğrenci limitim: {form.limit} • Öğrenci sayım: {form.active}</div>
         </div>
-        <div className="tile"><div className="tile-title">Öğrenci randevu alanı</div><div className="tile-icon">🗓️</div></div>
+        <div className="tile" onClick={() => setShowAppointmentModal(true)} style={{cursor: 'pointer'}}>
+            <div className="tile-title">Öğrenci randevu alanı</div>
+            <div className="tile-icon">🗓️</div>
+        </div>
         <div className="tile" onClick={handleOpenStudentList} style={{cursor: 'pointer'}}><div className="tile-title">Öğrencileri listele</div><div className="tile-icon">📋</div></div>
         <div className="tile add" onClick={() => setShowAddStudentModal(true)}>
           <div className="tile-title green">Yeni öğrenci ekle</div>
@@ -457,7 +592,103 @@ export default function OgretmenProfilTab() {
         </div>
       </div>
 
-      {/* Öğrenci ekleme modalı */}
+      {/* Randevu Modal */}
+      {showAppointmentModal && (
+        <div className="profile-modal-bg" onClick={() => setShowAppointmentModal(false)}>
+            <div className="profile-modal" onClick={e=>e.stopPropagation()}>
+                <form className="profile-update-form" onSubmit={handleCreateAppointment}>
+                    <h2 style={{marginTop:0}}>Yeni Randevu Oluştur</h2>
+                    <div className="form-row">
+                        <div style={{flex:1}}>
+                            <label>Öğrenci Seçin</label>
+                            <select 
+                                value={appointmentForm.studentId}
+                                onChange={(e) => setAppointmentForm({...appointmentForm, studentId: e.target.value})}
+                                required
+                                style={{width:'100%', padding: 10, borderRadius: 8, border: '1px solid #d1d5db'}}
+                            >
+                                <option value="">Seçiniz...</option>
+                                {students.map(s => (
+                                    <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="form-row">
+                        <div>
+                            <label>Tarih</label>
+                            <input 
+                                type="date" 
+                                value={appointmentForm.date} 
+                                onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})} 
+                                required 
+                            />
+                        </div>
+                        <div>
+                            <label>Saat</label>
+                            <input 
+                                type="time" 
+                                value={appointmentForm.time} 
+                                onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})} 
+                                required 
+                            />
+                        </div>
+                    </div>
+                    <div className="form-row">
+                        <div style={{flex:1}}>
+                            <label>Görüşme Konusu</label>
+                            <input 
+                                type="text" 
+                                value={appointmentForm.subject} 
+                                onChange={(e) => setAppointmentForm({...appointmentForm, subject: e.target.value})} 
+                                placeholder="Örn: Haftalık Planlama"
+                                required 
+                            />
+                        </div>
+                    </div>
+                    
+                    {apptError && <div style={{color: '#b91c1c', marginBottom: 10}}>{apptError}</div>}
+                    {apptSuccess && <div style={{color: '#16a34a', marginBottom: 10}}>{apptSuccess}</div>}
+
+                    <div style={{display:'flex',justifyContent:'flex-end'}}>
+                        <button type="button" className="edit-btn ghost" style={{marginRight:10}} onClick={() => setShowAppointmentModal(false)}>Vazgeç</button>
+                        <button type="submit" className="edit-btn" disabled={creatingAppt}>{creatingAppt ? 'Kaydediliyor...' : 'Randevu Oluştur'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {/* Randevu Detay Popup */}
+      {selectedApptDetail && (
+        <div className="profile-modal-bg" onClick={() => setSelectedApptDetail(null)}>
+            <div className="profile-modal" onClick={e=>e.stopPropagation()} style={{maxWidth: 400}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                    <h3 style={{margin:0}}>Randevu Detayları</h3>
+                    <button onClick={() => setSelectedApptDetail(null)} style={{background:'none', border:'none', cursor:'pointer'}}>
+                        <FontAwesomeIcon icon={faTimes} />
+                    </button>
+                </div>
+                <div style={{marginBottom: 10, color: '#6b7280'}}>
+                    Tarih: <b>{new Date(selectedApptDetail.date).toLocaleDateString('tr-TR')}</b>
+                </div>
+                <div style={{display:'flex', flexDirection:'column', gap: 10}}>
+                    {selectedApptDetail.appointments.map(appt => (
+                        <div key={appt.id} style={{padding: 10, background: '#f3f4f6', borderRadius: 8}}>
+                            <div style={{fontWeight: 'bold', color: '#111827'}}>{appt.student_name}</div>
+                            <div style={{fontSize: 14, color: '#374151'}}>Saat: {appt.time}</div>
+                            <div style={{fontSize: 14, color: '#374151', marginTop: 4}}>Konu: {appt.subject}</div>
+                        </div>
+                    ))}
+                </div>
+                <div style={{marginTop: 20, textAlign: 'right'}}>
+                    <button className="edit-btn" onClick={() => setSelectedApptDetail(null)}>Tamam</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Öğrenci Ekleme Modal */}
       {showAddStudentModal && (
         <div className="profile-modal-bg" onClick={() => setShowAddStudentModal(false)}>
           <div className="profile-modal" onClick={e=>e.stopPropagation()}>
@@ -769,30 +1000,21 @@ export default function OgretmenProfilTab() {
       {/* Takvim alanı */}
       <div className="calendar-wrapper">
         <div className="calendar-card">
-          <div className="calendar-header">Takvim</div>
+          <div className="calendar-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <button onClick={handlePrevMonth} style={{background:'none', border:'none', cursor:'pointer'}}><FontAwesomeIcon icon={faChevronLeft}/></button>
+            <span>{getMonthName(currentDate.getMonth())} {currentDate.getFullYear()}</span>
+            <button onClick={handleNextMonth} style={{background:'none', border:'none', cursor:'pointer'}}><FontAwesomeIcon icon={faChevronRight}/></button>
+          </div>
           <div className="calendar-grid">
-            {Array.from({ length: 30 }, (_, i) => i + 1).map((day) => {
-              const hasAppt = Boolean(appointments[day]);
-              return (
-                <button
-                  key={day}
-                  className={`cal-cell ${hasAppt ? 'has-appt' : ''} ${selectedDay === day ? 'selected' : ''}`}
-                  onClick={() => setSelectedDay(day)}
-                >
-                  <span className="num">{day}</span>
-                  {hasAppt && <span className="tick" />}
-                </button>
-              );
-            })}
+            {renderCalendar()}
           </div>
           <div className="calendar-detail">
-            {selectedDay && appointments[selectedDay] ? (
-              <div className="detail-row">
-                <span className="detail-title">Randevu:</span>
-                <span className="detail-text">{appointments[selectedDay].student} • {appointments[selectedDay].time}</span>
-              </div>
+            {selectedApptDetail ? (
+                <div style={{color: '#16a34a', fontWeight: 'bold'}}>
+                    Seçili Tarih: {new Date(selectedApptDetail.date).toLocaleDateString('tr-TR')} ({selectedApptDetail.appointments.length} Randevu)
+                </div>
             ) : (
-              <div className="detail-empty">Seçili günde randevu bulunmuyor</div>
+                <div className="detail-empty">Randevu detayı için takvimdeki kırmızı noktalı günlere tıklayın.</div>
             )}
           </div>
         </div>
@@ -800,4 +1022,3 @@ export default function OgretmenProfilTab() {
     </div>
   );
 }
-
