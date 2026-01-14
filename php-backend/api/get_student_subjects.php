@@ -158,15 +158,42 @@ try {
         }
     }
 
-    // Tekilleştir (aynı isimli dersler olabilir, id'ler farklı olsa da)
-    $uniqueSubjects = [];
-    $seenNames = [];
+    $subjectByName = [];
+    $stmtTopicCount = $db->prepare("SELECT COUNT(*) FROM sinav_konulari WHERE ders_id = ?");
     foreach ($subjects as $s) {
-        if (!in_array($s['ders_adi'], $seenNames)) {
-            $uniqueSubjects[] = $s;
-            $seenNames[] = $s['ders_adi'];
+        $name = $s['ders_adi'];
+        $stmtTopicCount->execute([$s['id']]);
+        $topicCount = (int)$stmtTopicCount->fetchColumn();
+        $score = 0;
+        if (!empty($s['soru_sayisi'])) {
+            $score += 1;
+        }
+        if ($topicCount > 0) {
+            $score += 2;
+        }
+        if (!isset($subjectByName[$name])) {
+            $subjectByName[$name] = [
+                'record' => $s,
+                'score' => $score,
+                'topicCount' => $topicCount
+            ];
+        } else {
+            $existing = $subjectByName[$name];
+            if (
+                $score > $existing['score'] ||
+                ($score === $existing['score'] && $topicCount > $existing['topicCount'])
+            ) {
+                $subjectByName[$name] = [
+                    'record' => $s,
+                    'score' => $score,
+                    'topicCount' => $topicCount
+                ];
+            }
         }
     }
+    $uniqueSubjects = array_map(function($entry) {
+        return $entry['record'];
+    }, array_values($subjectByName));
 
     echo json_encode([
         'success' => true,

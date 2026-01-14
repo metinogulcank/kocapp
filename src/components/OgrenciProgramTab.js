@@ -261,6 +261,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   const [showTopicAnalysisModal, setShowTopicAnalysisModal] = useState(false);
   const [topicAnalysisDateFilter, setTopicAnalysisDateFilter] = useState('3_ay');
   const [topicAnalysisDateRange, setTopicAnalysisDateRange] = useState({ start: null, end: null });
+  const [showTopicAnalysisInfo, setShowTopicAnalysisInfo] = useState(false);
   const [topicAnalysisSubject, setTopicAnalysisSubject] = useState('');
   const [resultPopupProgram, setResultPopupProgram] = useState(null);
   const [resultPopupInputs, setResultPopupInputs] = useState({ dogru: '', yanlis: '', bos: '' });
@@ -512,10 +513,27 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       }
       setIsDersLoading(true);
       try {
-        const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?alan=${encodeURIComponent(studentAlan)}`);
-        if (data.success) {
-          setDynamicSubjects(data.subjects || []);
+        let subjects = [];
+        const rawAlan = studentAlan.split(',')[0].trim();
+        if (rawAlan.startsWith('comp_')) {
+          const compId = rawAlan.replace('comp_', '');
+          const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(compId)}`);
+          if (data.success) {
+            subjects = data.subjects || [];
+          }
+        } else if (rawAlan.startsWith('exam_')) {
+          const examId = rawAlan.replace('exam_', '');
+          const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_exam_subjects.php?sinavId=${encodeURIComponent(examId)}`);
+          if (data.success) {
+            subjects = data.subjects || [];
+          }
+        } else {
+          const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?alan=${encodeURIComponent(studentAlan)}`);
+          if (data.success) {
+            subjects = data.subjects || [];
+          }
         }
+        setDynamicSubjects(subjects);
       } catch (error) {
         console.error('Dersler yüklenemedi:', error);
       } finally {
@@ -532,16 +550,14 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       return;
     }
 
-    // Ders adından ID'yi bul (Önce tam eşleşme, sonra kısmi eşleşme dene)
     const normalizedSearch = subjectName.trim().toLowerCase();
-    let subject = [...dynamicSubjects, ...allSubjects].find(s => 
+    let subject = dynamicSubjects.find(s => 
       s.ders_adi.trim().toLowerCase() === normalizedSearch
     );
 
-    // Tam eşleşme yoksa, TYT/AYT gibi önekleri görmezden gelerek ara
     if (!subject) {
       const searchWithoutPrefix = normalizedSearch.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
-      subject = [...dynamicSubjects, ...allSubjects].find(s => {
+      subject = dynamicSubjects.find(s => {
         const normalizedDers = s.ders_adi.trim().toLowerCase();
         const dersWithoutPrefix = normalizedDers.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
         return dersWithoutPrefix === searchWithoutPrefix;
@@ -618,74 +634,154 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     return Array.from(topicsSet).sort();
   }, [programs, topicAnalysisSubject]);
 
-  // Konu başarı istatistiklerini hesapla ve sırala
   const sortedTopicStats = useMemo(() => {
     if (!studentTopics.length) return [];
 
+    const now = new Date();
+    let filterStart = null;
+    let filterEnd = null;
+
+    switch (topicAnalysisDateFilter) {
+      case '1_hafta': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 7);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case '15_gun': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 15);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case '1_ay': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 1);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case '3_ay': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 3);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case '6_ay': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 6);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case '12_ay': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 12);
+        filterStart = d;
+        filterEnd = now;
+        break;
+      }
+      case 'manuel': {
+        if (topicAnalysisDateRange.start && topicAnalysisDateRange.end) {
+          const start = new Date(topicAnalysisDateRange.start);
+          const end = new Date(topicAnalysisDateRange.end);
+          if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+            filterStart = start;
+            filterEnd = end;
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
     const stats = studentTopics.map(topic => {
-      // Bu konuya ait programları bul
       const topicPrograms = programs.filter(p => 
         p.konu && p.konu.trim() === topic && 
-        (!topicAnalysisSubject || p.ders === topicAnalysisSubject) &&
-        (p.dogru || p.yanlis || p.bos) // Sadece sonucu olanlar
+        (!topicAnalysisSubject || p.ders === topicAnalysisSubject)
       );
 
-      // Başarı hesaplama
       let weightedSum = 0;
       let totalWeight = 0;
-      let last3MonthsSum = 0;
-      let last3MonthsCount = 0;
-      let totalQuestions = 0;
-      let totalCorrect = 0;
-
-      const now = new Date();
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setMonth(now.getMonth() - 3);
+      let filteredCorrect = 0;
+      let filteredTotal = 0;
 
       topicPrograms.forEach(prog => {
-        const dogru = parseFloat(prog.dogru) || 0;
-        const yanlis = parseFloat(prog.yanlis) || 0;
-        const bos = parseFloat(prog.bos) || 0;
-        const total = dogru + yanlis + bos;
-        
+        const rawDogru = parseFloat(prog.dogru) || 0;
+        const rawYanlis = parseFloat(prog.yanlis) || 0;
+        const rawBos = parseFloat(prog.bos) || 0;
+        const soruSayisi = parseInt(prog.soru_sayisi) || 0;
+
+        let dogru = rawDogru;
+        let yanlis = rawYanlis;
+        let bos = rawBos;
+        let total = dogru + yanlis + bos;
+
+        if (total === 0 && soruSayisi > 0) {
+          total = soruSayisi;
+          dogru = 0;
+          yanlis = 0;
+          bos = soruSayisi;
+        }
+
         if (total === 0) return;
 
-        totalQuestions += total;
-        totalCorrect += dogru;
-
         const successRate = (dogru / total) * 100;
-        const progDate = new Date(prog.tarih);
-        
-        // Dinamik ağırlıklandırma
-        // Son 1 hafta: 3x, Son 1 ay: 2x, Daha eski: 1x
+        const progDate = prog.tarih ? new Date(prog.tarih) : null;
+
         let weight = 1;
-        const diffDays = (now - progDate) / (1000 * 60 * 60 * 24);
-        
-        if (diffDays <= 7) weight = 3;
-        else if (diffDays <= 30) weight = 2;
+        if (progDate && !isNaN(progDate.getTime())) {
+          const diffDays = (now - progDate) / (1000 * 60 * 60 * 24);
+          if (diffDays <= 7) weight = 3;
+          else if (diffDays <= 30) weight = 2;
+        }
 
         weightedSum += successRate * weight;
         totalWeight += weight;
 
-        // Son 3 ay
-        if (progDate >= threeMonthsAgo) {
-          last3MonthsSum += successRate;
-          last3MonthsCount++;
+        if (!filterStart || !filterEnd || (progDate && progDate >= filterStart && progDate <= filterEnd)) {
+          filteredCorrect += dogru;
+          filteredTotal += total;
         }
       });
 
       return {
         topic,
         dynamicPercent: totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0,
-        last3MonthsPercent: last3MonthsCount > 0 ? Math.round(last3MonthsSum / last3MonthsCount) : 0,
-        totalQuestions,
-        overallPercent: totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0
+        filteredPercent: filteredTotal > 0 ? Math.round((filteredCorrect / filteredTotal) * 100) : 0
       };
     });
 
-    // Başarı puanına göre artan sıralama (Düşükten yükseğe)
-    return stats.sort((a, b) => a.overallPercent - b.overallPercent);
-  }, [studentTopics, programs, topicAnalysisSubject]);
+    return stats.sort((a, b) => a.dynamicPercent - b.dynamicPercent);
+  }, [studentTopics, programs, topicAnalysisSubject, topicAnalysisDateFilter, topicAnalysisDateRange]);
+
+  const topicAnalysisFilterLabel = useMemo(() => {
+    switch (topicAnalysisDateFilter) {
+      case '1_hafta':
+        return 'Son 1 Hafta';
+      case '15_gun':
+        return 'Son 15 Gün';
+      case '1_ay':
+        return 'Son 1 Ay';
+      case '3_ay':
+        return 'Son 3 Ay';
+      case '6_ay':
+        return 'Son 6 Ay';
+      case '12_ay':
+        return 'Son 12 Ay';
+      case 'manuel':
+        if (topicAnalysisDateRange.start && topicAnalysisDateRange.end) {
+          return `${topicAnalysisDateRange.start} - ${topicAnalysisDateRange.end}`;
+        }
+        return 'Manuel Tarih Aralığı';
+      default:
+        return '';
+    }
+  }, [topicAnalysisDateFilter, topicAnalysisDateRange]);
 
   // Modal açıldığında ilk dersi otomatik seç
   useEffect(() => {
@@ -2043,6 +2139,60 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
     // Yeni sekmede AI panelini aç
     window.open(`/ogrenci-ai/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSendWeeklyAnalysisToParent = async (source) => {
+    if (!student?.id || !teacherId || !weekStartIso) {
+      setTeacherAnalysisMessage('Öğrenci, öğretmen veya hafta bilgisi eksik.');
+      setTeacherAnalysisMessageType('error');
+      return;
+    }
+
+    try {
+      const payload = {
+        source,
+        studentId: student.id,
+        teacherId,
+        weekStart: weekStartIso,
+        teacherComment: teacherAnalysis || '',
+        aiComment: aiAnalysis || ''
+      };
+
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const data = await safeFetchJson(
+        `${API_BASE}/php-backend/api/send_weekly_analysis_notification.php`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (data.success) {
+        setTeacherAnalysisMessage('Haftalık analiz velilere gönderildi.');
+        setTeacherAnalysisMessageType('success');
+      } else {
+        setTeacherAnalysisMessage(data.message || 'Haftalık analiz gönderilemedi.');
+        setTeacherAnalysisMessageType('error');
+      }
+    } catch (error) {
+      console.error('Haftalık analiz bildirimi gönderilemedi:', error);
+      setTeacherAnalysisMessage('Haftalık analiz gönderilemedi.');
+      setTeacherAnalysisMessageType('error');
+    } finally {
+      setTimeout(() => {
+        setTeacherAnalysisMessage('');
+        setTeacherAnalysisMessageType('success');
+      }, 4000);
+    }
   };
 
   const handleOpenTeacherAnalysis = () => {
@@ -3632,6 +3782,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
             <button
               type="button"
               className="send-parent-btn"
+              onClick={() => handleSendWeeklyAnalysisToParent('teacher')}
             >
               Haftalık Analizi Veliye Gönder
           </button>
@@ -3656,6 +3807,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
             <button
               type="button"
               className="send-parent-btn"
+              onClick={() => handleSendWeeklyAnalysisToParent('ai')}
             >
               Haftalık Analizi Veliye Gönder
             </button>
@@ -4117,19 +4269,28 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                 )}
               </div>
 
-              <div className="topic-analysis-table-container">
+              <div className="topic-analysis-table-container" style={{ position: 'relative' }}>
                 <table className="topic-analysis-table">
                   <thead>
                     <tr>
                       <th>Konu</th>
-                      <th>Başarı %</th>
-                      <th>Toplam Soru</th>
+                      <th>
+                        <span>Dinamik %</span>
+                        <button
+                          type="button"
+                          className="topic-analysis-info-btn"
+                          onClick={() => setShowTopicAnalysisInfo(prev => !prev)}
+                        >
+                          <FontAwesomeIcon icon={faInfoCircle} />
+                        </button>
+                      </th>
+                      <th>{topicAnalysisFilterLabel} %</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedTopicStats.length > 0 ? (
                       sortedTopicStats.map((stat, idx) => {
-                        const { topic, overallPercent, totalQuestions } = stat;
+                        const { topic, dynamicPercent, filteredPercent } = stat;
                         const getPercentageClass = (percent) => {
                           if (percent < 50) return 'percent-red';
                           if (percent < 75) return 'percent-yellow';
@@ -4138,11 +4299,11 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                         return (
                           <tr key={idx}>
                             <td>{topic}</td>
-                            <td className={`topic-percentage ${getPercentageClass(overallPercent)}`}>
-                              {overallPercent}%
+                            <td className={`topic-percentage ${getPercentageClass(dynamicPercent)}`}>
+                              {dynamicPercent}%
                             </td>
-                            <td className="topic-percentage" style={{ color: '#374151' }}>
-                              {totalQuestions}
+                            <td className={`topic-percentage ${getPercentageClass(filteredPercent)}`}>
+                              {filteredPercent}%
                             </td>
                           </tr>
                         );
@@ -4156,6 +4317,12 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                     )}
                   </tbody>
                 </table>
+                {showTopicAnalysisInfo && (
+                  <div className="topic-analysis-info-popup">
+                    Bu kısımdaki dinamik başarı yüzdesi, geçmiş netlerini daha düşük,
+                    yakın zamandaki netlerini ise daha yüksek katsayıyla çarparak hesaplar.
+                  </div>
+                )}
               </div>
 
               

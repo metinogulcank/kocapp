@@ -1909,6 +1909,43 @@
   background: #f9fafb;
 }
 
+.topic-analysis-info-btn {
+  margin-left: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0;
+}
+
+.topic-analysis-info-btn:hover {
+  color: #4b5563;
+}
+
+.topic-analysis-info-popup {
+  position: absolute;
+  top: 40px;
+  right: 16px;
+  max-width: 320px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #4b5563;
+  z-index: 20;
+}
+
+.topic-analysis-info-popup::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 24px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: transparent transparent white transparent;
+}
+
 .topic-percentage {
   font-weight: 600;
 }
