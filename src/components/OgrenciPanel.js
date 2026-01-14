@@ -1522,10 +1522,23 @@ const OgrenciPanel = () => {
   }, [bransExamType, examComponents]);
 
   const handleBransFormChange = (field, value) => {
-    setBransDenemeForm((prev) => ({
-      ...prev,
-      [field]: value
-    }));
+    setBransDenemeForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === 'ders') {
+        const meta = findSubjectMetaByName(value);
+        if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+          next.soruSayisi = String(meta.soru_sayisi);
+        }
+      }
+      if (field === 'alan') {
+        next.ders = '';
+        next.soruSayisi = '';
+        next.dogru = '';
+        next.yanlis = '';
+        next.bos = '';
+      }
+      return next;
+    });
     if (field === 'ders') {
       setBransKonuDetayAcik(false);
       setBransKonular([]);
@@ -1600,6 +1613,16 @@ const OgrenciPanel = () => {
     }
     if (!bransDenemeForm.ders || !bransDenemeForm.denemeAdi || !bransDenemeForm.denemeTarihi) {
       alert('Ders, deneme adı ve tarih zorunludur');
+      return;
+    }
+    const soru = Number(bransDenemeForm.soruSayisi) || 0;
+    const dogru = Number(bransDenemeForm.dogru) || 0;
+    const yanlis = Number(bransDenemeForm.yanlis) || 0;
+    const bos = Number(bransDenemeForm.bos) || 0;
+    if (soru > 0 && dogru + yanlis + bos > soru) {
+      alert(
+        `Toplam soru sayısı (Doğru + Yanlış + Boş: ${dogru + yanlis + bos}), ders için tanımlanan soru sayısından (${soru}) büyük olamaz.`
+      );
       return;
     }
     const payloadKonular = bransKonular.map((k, idx) => {
@@ -1738,6 +1761,27 @@ const OgrenciPanel = () => {
     }));
   }, [bransDenemeList]);
 
+  const findSubjectMetaByName = (name) => {
+    if (!name || !allSubjects || allSubjects.length === 0) return null;
+    const normalizedSearch = name.trim().toLowerCase();
+    let found = allSubjects.find(
+      (s) => (s.ders_adi || '').trim().toLowerCase() === normalizedSearch
+    );
+    if (!found) {
+      const searchWithoutPrefix = normalizedSearch
+        .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
+        .trim();
+      found = allSubjects.find((s) => {
+        const normalizedDers = (s.ders_adi || '').trim().toLowerCase();
+        const dersWithoutPrefix = normalizedDers
+          .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
+          .trim();
+        return dersWithoutPrefix === searchWithoutPrefix;
+      });
+    }
+    return found || null;
+  };
+
   // Genel deneme helper fonksiyonları
   const isGenelDenemeDegerlendirmeTamamlandi = () => {
     return genelDenemeDegerlendirme.zamanYeterli !== null &&
@@ -1760,17 +1804,51 @@ const OgrenciPanel = () => {
       alert('Deneme adı ve tarihi zorunludur');
       return;
     }
-    
+
+    for (const [ders, data] of Object.entries(genelDenemeDersler)) {
+      let soru = Number(data.soruSayisi);
+      if (!Number.isFinite(soru) || soru <= 0) {
+        const meta = findSubjectMetaByName(ders);
+        if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+          soru = Number(meta.soru_sayisi) || 0;
+        } else {
+          soru = 0;
+        }
+      }
+      const dogru = Number(data.dogru) || 0;
+      const yanlis = Number(data.yanlis) || 0;
+      const bos = Number(data.bos) || 0;
+      if (soru > 0 && dogru + yanlis + bos > soru) {
+        alert(
+          `${ders} dersi için girilen toplam sayı (Doğru + Yanlış + Boş: ${
+            dogru + yanlis + bos
+          }), soru sayısından (${soru}) büyük olamaz!`
+        );
+        return;
+      }
+    }
+
     setGenelDenemeKaydediliyor(true);
     try {
-      const dersSonuclari = Object.entries(genelDenemeDersler).map(([ders, data]) => ({
-        ders,
-        soruSayisi: Number(data.soruSayisi) || 0,
-        dogru: Number(data.dogru) || 0,
-        yanlis: Number(data.yanlis) || 0,
-        bos: Number(data.bos) || 0,
-        net: Number(data.net) || 0
-      }));
+      const dersSonuclari = Object.entries(genelDenemeDersler).map(([ders, data]) => {
+        let soruSayisi = Number(data.soruSayisi);
+        if (!Number.isFinite(soruSayisi) || soruSayisi <= 0) {
+          const meta = findSubjectMetaByName(ders);
+          if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+            soruSayisi = Number(meta.soru_sayisi) || 0;
+          } else {
+            soruSayisi = 0;
+          }
+        }
+        return {
+          ders,
+          soruSayisi,
+          dogru: Number(data.dogru) || 0,
+          yanlis: Number(data.yanlis) || 0,
+          bos: Number(data.bos) || 0,
+          net: Number(data.net) || 0
+        };
+      });
 
       const data = await safeFetchJson(`${API_BASE}/php-backend/api/save_genel_deneme.php`, {
         method: 'POST',

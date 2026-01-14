@@ -66,6 +66,24 @@ try {
     }
     $denemeTarihi = $tarihObj->format('Y-m-d');
 
+    // Ders sonuçları için temel doğrulama
+    if (!empty($dersSonuclari)) {
+        foreach ($dersSonuclari as $dersSonuc) {
+            $soruSayisi = isset($dersSonuc['soruSayisi']) ? (int)$dersSonuc['soruSayisi'] : 0;
+            $dogru = isset($dersSonuc['dogru']) ? (int)$dersSonuc['dogru'] : 0;
+            $yanlis = isset($dersSonuc['yanlis']) ? (int)$dersSonuc['yanlis'] : 0;
+            $bos = isset($dersSonuc['bos']) ? (int)$dersSonuc['bos'] : 0;
+            if ($soruSayisi > 0 && ($dogru + $yanlis + $bos) > $soruSayisi) {
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Bir ders için girilen doğru+yanlış+boş toplamı soru sayısını aşamaz'
+                ]);
+                exit;
+            }
+        }
+    }
+
     $db->beginTransaction();
 
     // Genel deneme kaydet
@@ -131,4 +149,3 @@ try {
     ]);
 }
 ?>
-

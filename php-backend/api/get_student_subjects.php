@@ -26,7 +26,7 @@ try {
     $subjects = [];
 
     if ($alan === 'all') {
-        $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri ORDER BY ders_adi ASC");
+        $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri ORDER BY ders_adi ASC");
         $stmt->execute();
         $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } else {
@@ -40,7 +40,7 @@ try {
                 $compId = str_replace('comp_', '', $tekAlan);
                 
                 // Önce bileşenin kendi derslerini getir
-                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
+                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
                 $stmt->execute([$compId]);
                 $compSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $subjects = array_merge($subjects, $compSubjects);
@@ -56,13 +56,13 @@ try {
                     
                     if ($compInfo['parent_id']) {
                         $currentCompId = $compInfo['parent_id'];
-                        $stmtUpper = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
+                        $stmtUpper = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
                         $stmtUpper->execute([$currentCompId]);
                         $upperSubjects = $stmtUpper->fetchAll(PDO::FETCH_ASSOC);
                         $subjects = array_merge($subjects, $upperSubjects);
                     } else {
                         // Ana sınavın derslerini getir
-                        $stmtExam = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
+                        $stmtExam = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
                         $stmtExam->execute([$compInfo['sinav_id']]);
                         $examSubjects = $stmtExam->fetchAll(PDO::FETCH_ASSOC);
                         $subjects = array_merge($subjects, $examSubjects);
@@ -71,7 +71,7 @@ try {
                 }
             } elseif (strpos($tekAlan, 'exam_') === 0) {
                 $examId = str_replace('exam_', '', $tekAlan);
-                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
+                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
                 $stmt->execute([$examId]);
                 $examSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $subjects = array_merge($subjects, $examSubjects);
@@ -80,7 +80,7 @@ try {
                 $processed = false;
 
                 // 1. Önce doğrudan bileşen ID'si olarak dene
-                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
+                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
                 $stmt->execute([$tekAlan]);
                 $compSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 if ($compSubjects) {
@@ -113,7 +113,7 @@ try {
 
                 // 2. Sınav ID'si olarak dene
                 if (!$processed) {
-                    $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
+                    $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE sinav_id = ? AND (component_id IS NULL OR component_id = '') ORDER BY sira ASC, ders_adi ASC");
                     $stmt->execute([$tekAlan]);
                     $examSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     if ($examSubjects) {
@@ -137,7 +137,7 @@ try {
                         $compId = $stmt->fetchColumn();
 
                         if ($compId) {
-                            $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
+                            $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE component_id = ? ORDER BY sira ASC, ders_adi ASC");
                             $stmt->execute([$compId]);
                             $compSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             $subjects = array_merge($subjects, $compSubjects);
@@ -146,7 +146,7 @@ try {
                             $stmt->execute(['%' . $searchTerm . '%']);
                             $examId = $stmt->fetchColumn();
                             if ($examId) {
-                                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url FROM sinav_dersleri WHERE sinav_id = ? ORDER BY sira ASC, ders_adi ASC");
+                                $stmt = $db->prepare("SELECT id, ders_adi, color, icon_url, soru_sayisi FROM sinav_dersleri WHERE sinav_id = ? ORDER BY sira ASC, ders_adi ASC");
                                 $stmt->execute([$examId]);
                                 $examSubjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 $subjects = array_merge($subjects, $examSubjects);

@@ -564,7 +564,7 @@ const MEETING_DAY_OPTIONS = [
         setIsSoruAtamaDersLoading(false);
       }
     };
-    if (activeMenu === 'plan-program' && !selectedStudent) {
+    if ((activeMenu === 'plan-program' && !selectedStudent) || activeMenu === 'genel-denemeler' || activeMenu === 'brans-denemeleri') {
       fetchAllSubjects();
     }
   }, [activeMenu, selectedStudent]);
@@ -739,6 +739,7 @@ const MEETING_DAY_OPTIONS = [
   const [genelDenemeKaydediliyor, setGenelDenemeKaydediliyor] = useState(false);
   const [genelDenemeList, setGenelDenemeList] = useState([]);
   const [genelDenemeListLoading, setGenelDenemeListLoading] = useState(false);
+  const [genelDenemeSubjects, setGenelDenemeSubjects] = useState([]);
   const [bransDenemeForm, setBransDenemeForm] = useState({
     alan: selectedStudent?.alan || '',
     ders: '',
@@ -758,6 +759,57 @@ const MEETING_DAY_OPTIONS = [
   const bransAreaRaw = bransDenemeForm.alan || selectedStudent?.alan || '';
   const bransArea = (bransAreaRaw || '').toLowerCase();
   const bransIsYks = bransArea.startsWith('yks');
+  const findSubjectMetaByName = (name) => {
+    if (!name) return null;
+    const sources = [
+      ...(genelDenemeSubjects || []),
+      ...(dynamicSubjectsForIlerleme || []),
+      ...(soruAtamaSubjects || [])
+    ];
+    if (!sources.length) return null;
+    const normalizedSearch = name.trim().toLowerCase();
+    let found = sources.find(s => (s.ders_adi || '').trim().toLowerCase() === normalizedSearch);
+    if (!found) {
+      const searchWithoutPrefix = normalizedSearch.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+      found = sources.find(s => {
+        const normalizedDers = (s.ders_adi || '').trim().toLowerCase();
+        const dersWithoutPrefix = normalizedDers.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+        return dersWithoutPrefix === searchWithoutPrefix;
+      });
+    }
+    return found || null;
+  };
+  
+  useEffect(() => {
+    const fetchGenelDenemeSubjects = async () => {
+      if (activeMenu !== 'genel-denemeler' && activeMenu !== 'brans-denemeleri') {
+        setGenelDenemeSubjects([]);
+        return;
+      }
+      const currentExamType =
+        activeMenu === 'genel-denemeler'
+          ? genelDenemeForm.sinavTipi
+          : bransExamType;
+      const compId = currentExamType || examComponents[0]?.id;
+      if (!compId) {
+        setGenelDenemeSubjects([]);
+        return;
+      }
+      try {
+        const data = await safeFetchJson(
+          `${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(compId)}`
+        );
+        if (data.success) {
+          setGenelDenemeSubjects(data.subjects || []);
+        } else {
+          setGenelDenemeSubjects([]);
+        }
+      } catch {
+        setGenelDenemeSubjects([]);
+      }
+    };
+    fetchGenelDenemeSubjects();
+  }, [activeMenu, genelDenemeForm.sinavTipi, bransExamType, examComponents]);
   
   // Dinamik ders listesi alma yardımcı fonksiyonu
   const getDersList = (examCompId, fallbackArea) => {
@@ -1940,18 +1992,29 @@ const MEETING_DAY_OPTIONS = [
   }, [bransDenemeForm.dogru, bransDenemeForm.yanlis]);
 
   const handleBransFormChange = (field, value) => {
-    setBransDenemeForm((prev) => ({
-      ...prev,
-      [field]: value
-    }));
+    setBransDenemeForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === 'ders') {
+        const meta = findSubjectMetaByName(value);
+        if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+          next.soruSayisi = String(meta.soru_sayisi);
+        }
+      }
+      if (field === 'alan') {
+        next.ders = '';
+        next.soruSayisi = '';
+        next.dogru = '';
+        next.yanlis = '';
+        next.bos = '';
+      }
+      return next;
+    });
     if (field === 'ders') {
       setBransKonuDetayAcik(false);
       setBransKonular([]);
       fetchBransKonular(value);
     }
     if (field === 'alan') {
-      // Alan değişince ders ve konuları sıfırla
-      setBransDenemeForm((prev) => ({ ...prev, ders: '' }));
       setBransKonuDetayAcik(false);
       setBransKonular([]);
     }
@@ -2028,6 +2091,14 @@ const MEETING_DAY_OPTIONS = [
     }
     if (!bransDenemeForm.ders || !bransDenemeForm.denemeAdi || !bransDenemeForm.denemeTarihi) {
       alert('Ders, deneme adı ve tarih zorunludur');
+      return;
+    }
+    const soru = Number(bransDenemeForm.soruSayisi) || 0;
+    const dogru = Number(bransDenemeForm.dogru) || 0;
+    const yanlis = Number(bransDenemeForm.yanlis) || 0;
+    const bos = Number(bransDenemeForm.bos) || 0;
+    if (soru > 0 && dogru + yanlis + bos > soru) {
+      alert(`Toplam soru sayısı (Doğru + Yanlış + Boş: ${dogru + yanlis + bos}), ders için tanımlanan soru sayısından (${soru}) büyük olamaz.`);
       return;
     }
     const payloadKonular = bransKonular.map((k, idx) => {
@@ -2187,17 +2258,48 @@ const MEETING_DAY_OPTIONS = [
       alert('Deneme adı ve tarihi zorunludur');
       return;
     }
+
+    for (const [ders, data] of Object.entries(genelDenemeDersler)) {
+      let soru = Number(data.soruSayisi);
+      if (!Number.isFinite(soru) || soru <= 0) {
+        const meta = findSubjectMetaByName(ders);
+        if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+          soru = Number(meta.soru_sayisi) || 0;
+        } else {
+          soru = 0;
+        }
+      }
+      const dogru = Number(data.dogru) || 0;
+      const yanlis = Number(data.yanlis) || 0;
+      const bos = Number(data.bos) || 0;
+
+      if (soru > 0 && dogru + yanlis + bos > soru) {
+        alert(`${ders} dersi için girilen toplam sayı (Doğru + Yanlış + Boş: ${dogru + yanlis + bos}), soru sayısından (${soru}) büyük olamaz!`);
+        return;
+      }
+    }
     
     setGenelDenemeKaydediliyor(true);
     try {
-      const dersSonuclari = Object.entries(genelDenemeDersler).map(([ders, data]) => ({
-        ders,
-        soruSayisi: Number(data.soruSayisi) || 0,
-        dogru: Number(data.dogru) || 0,
-        yanlis: Number(data.yanlis) || 0,
-        bos: Number(data.bos) || 0,
-        net: Number(data.net) || 0
-      }));
+      const dersSonuclari = Object.entries(genelDenemeDersler).map(([ders, data]) => {
+        let soruSayisi = Number(data.soruSayisi);
+        if (!Number.isFinite(soruSayisi) || soruSayisi <= 0) {
+          const meta = findSubjectMetaByName(ders);
+          if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
+            soruSayisi = Number(meta.soru_sayisi) || 0;
+          } else {
+            soruSayisi = 0;
+          }
+        }
+        return {
+          ders,
+          soruSayisi,
+          dogru: Number(data.dogru) || 0,
+          yanlis: Number(data.yanlis) || 0,
+          bos: Number(data.bos) || 0,
+          net: Number(data.net) || 0
+        };
+      });
 
       const data = await safeFetchJson(`${API_BASE}/php-backend/api/save_genel_deneme.php`, {
         method: 'POST',
@@ -6051,7 +6153,9 @@ const MEETING_DAY_OPTIONS = [
                               <h4 style={{fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16}}>Ders Sonuçları</h4>
                               <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16}}>
                                 {currentDersList.map((ders) => {
-                                  const dersData = genelDenemeDersler[ders] || { soruSayisi: '', dogru: '', yanlis: '', bos: '', net: 0 };
+                                  const meta = findSubjectMetaByName(ders);
+                                  const defaultSoru = meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null ? String(meta.soru_sayisi) : '';
+                                  const dersData = genelDenemeDersler[ders] || { soruSayisi: defaultSoru, dogru: '', yanlis: '', bos: '', net: 0 };
                                   const net = dersData.dogru && dersData.yanlis !== '' 
                                     ? (Number(dersData.dogru) - (Number(dersData.yanlis) * 0.25)).toFixed(2)
                                     : '0.00';

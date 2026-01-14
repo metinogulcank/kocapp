@@ -44,6 +44,15 @@ try {
     $bos = isset($data['bos']) ? (int)$data['bos'] : 0;
     $konular = isset($data['konular']) && is_array($data['konular']) ? $data['konular'] : [];
 
+    if ($soruSayisi > 0 && ($dogru + $yanlis + $bos) > $soruSayisi) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Doğru+yanlış+boş toplamı soru sayısını aşamaz'
+        ]);
+        exit;
+    }
+
     $net = $dogru - ($yanlis * 0.25);
     $net = round($net, 2);
 

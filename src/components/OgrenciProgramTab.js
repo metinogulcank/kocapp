@@ -946,7 +946,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   };
 
   const handleYapildiClick = (prog) => {
-    if (isStudentPanel && prog?.program_tipi === 'soru_cozum') {
+    // Öğretmen veya öğrenci fark etmeksizin, soru çözümü veya konu anlatımı ise sonuç kontrolü yap
+    if (prog?.program_tipi === 'soru_cozum' || prog?.program_tipi === 'konu_anlatim') {
       const originalInputs = {
         dogru: (prog.dogru !== null && prog.dogru !== undefined && prog.dogru !== '') ? parseInt(prog.dogru) || 0 : 0,
         yanlis: (prog.yanlis !== null && prog.yanlis !== undefined && prog.yanlis !== '') ? parseInt(prog.yanlis) || 0 : 0,
@@ -957,8 +958,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       const y = currentInputs.yanlis !== undefined && currentInputs.yanlis !== '' ? parseInt(currentInputs.yanlis) || 0 : originalInputs.yanlis;
       const b = currentInputs.bos !== undefined && currentInputs.bos !== '' ? parseInt(currentInputs.bos) || 0 : originalInputs.bos;
       const toplam = (d || 0) + (y || 0) + (b || 0);
+      
       if (toplam === 0) {
-        alert('Doğru/yanlış/bos girmeden Yapıldı işaretlenemez.');
         setValidationPopup({ visible: true, message: 'Veri girin' });
         setShakeStatusProgramId(prog.id);
         setTimeout(() => setShakeStatusProgramId(null), 700);
@@ -984,6 +985,19 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     setResultPopupInputs({ dogru: '', yanlis: '', bos: '' });
   };
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (expandedAciklama.size > 0) {
+        setExpandedAciklama(new Set());
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [expandedAciklama]);
+
   const toggleAciklama = (programId) => {
     setExpandedAciklama(prev => {
       const newSet = new Set(prev);
@@ -1002,6 +1016,38 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
   const handleZoomOut = () => {
     setCalendarScale(prev => Math.max(0.5, Number((prev - 0.1).toFixed(2))));
+  };
+
+  const handleResultChange = (programId, field, value) => {
+    // Allow only numbers
+    if (value && !/^\d*$/.test(value)) return;
+    
+    setStatusInputs(prev => ({
+      ...prev,
+      [programId]: {
+        ...(prev[programId] || { 
+            dogru: programs.find(p => p.id === programId)?.dogru || '',
+            yanlis: programs.find(p => p.id === programId)?.yanlis || '',
+            bos: programs.find(p => p.id === programId)?.bos || ''
+        }),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleResultBlur = (program) => {
+    const inputs = statusInputs[program.id];
+    if (!inputs) return; // No changes made
+    
+    const dogru = inputs.dogru !== undefined ? inputs.dogru : program.dogru;
+    const yanlis = inputs.yanlis !== undefined ? inputs.yanlis : program.yanlis;
+    const bos = inputs.bos !== undefined ? inputs.bos : program.bos;
+    
+    // Calculate new status locally
+    const tempProg = { ...program, dogru, yanlis, bos };
+    const newStatus = calculateStatus(tempProg);
+    
+    handleStatusUpdate(program, newStatus, dogru, yanlis, bos);
   };
 
   const handleAddProgramClick = (day) => {
@@ -1244,8 +1290,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       status: newStatus
     };
 
-    // Soru çözümü için doğru/yanlış/boş değerlerini ekle
-    if (program.program_tipi === 'soru_cozum') {
+    // Soru çözümü veya konu anlatımı için doğru/yanlış/boş değerlerini ekle
+    if (program.program_tipi === 'soru_cozum' || program.program_tipi === 'konu_anlatim') {
       // Değerler her zaman gönderilmeli (0 değeri de geçerli)
       payload.dogru = dogru !== null && dogru !== undefined ? parseInt(dogru) : 0;
       payload.yanlis = yanlis !== null && yanlis !== undefined ? parseInt(yanlis) : 0;
@@ -1286,8 +1332,8 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
   // Durum hesaplama fonksiyonu
   const calculateStatus = (program) => {
-    // Eğer soru çözümü değilse, direkt durumu döndür
-    if (program.program_tipi !== 'soru_cozum' || !program.soru_sayisi) {
+    // Eğer soru çözümü veya konu anlatımı değilse, direkt durumu döndür
+    if ((program.program_tipi !== 'soru_cozum' && program.program_tipi !== 'konu_anlatim') || !program.soru_sayisi) {
       return program.durum || 'yapilmadi';
     }
 
@@ -1425,6 +1471,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
         programTipi: program.program_tipi,
         ders: program.ders,
         konu: program.konu || null,
+        kaynak: program.kaynak || null,
+        aciklama: program.aciklama || null,
+        youtubeLinki: program.youtube_linki || null,
         soruSayisi: program.soru_sayisi || null,
         baslangicSaati: program.baslangic_saati,
         bitisSaati: program.bitis_saati
@@ -3150,9 +3199,24 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                               })()}
                               <span className="program-item-ders">{prog.ders}</span>
                             </div>
-                            {prog.konu && (
-                              <span className="program-item-konu">{prog.konu}</span>
-                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 2 }}>
+                              {prog.konu && (
+                                <span className="program-item-konu" style={{ flexShrink: 0, maxWidth: prog.kaynak ? '35%' : '100%' }}>{prog.konu}</span>
+                              )}
+                              {prog.kaynak && (
+                                <span className="program-item-kaynak-inline" title={prog.kaynak} style={{
+                                    fontSize: '11px', 
+                                    opacity: 0.8, 
+                                    whiteSpace: 'nowrap', 
+                                    overflow: 'hidden', 
+                                    textOverflow: 'ellipsis',
+                                    flex: 1,
+                                    minWidth: 0
+                                }}>
+                                   📚 {prog.kaynak}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           {/* Program type + soru sayısı */}
@@ -3160,47 +3224,45 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                             <div className="program-item-type-title">
                               <span>
                                 {getProgramTypeName(prog.program_tipi)}
+                                {prog.soru_sayisi ? ` - ${prog.soru_sayisi} soru` : ''}
                               </span>
                             </div>
-                            {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (
-                              <span className="program-item-type-count">{prog.soru_sayisi} soru</span>
-                            )}
                           </div>
 
                           {/* Details section: Kaynak, Açıklama, Soru Sayısı */}
                           <div className="program-item-details">
-                            {prog.kaynak && (
-                              <div className="program-item-kaynak">
-                                <span className="program-item-kaynak-text">📚 {prog.kaynak}</span>
-                                {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openResultPopup(prog);
-                                    }}
-                                    title="Soru sonuçlarını gir"
-                                    style={{
-                                      marginLeft: 8,
-                                      width: 26,
-                                      height: 26,
-                                      borderRadius: '50%',
-                                      border: '1px solid rgba(255, 255, 255, 0.7)',
-                                      background: 'transparent',
-                                      color: 'rgba(255, 255, 255, 0.9)',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      cursor: 'pointer',
-                                      flexShrink: 0
-                                    }}
-                                  >
-                                    <FontAwesomeIcon icon={faCheck} />
-                                  </button>
+                            <div className="program-item-kaynak-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%', gap: 4, minHeight: 24 }}>
+                                {(prog.program_tipi === 'soru_cozum' || prog.program_tipi === 'konu_anlatim') && (
+                                  <div className="result-inputs" onClick={(e) => e.stopPropagation()}>
+                                    <input 
+                                      className="result-box correct"
+                                      placeholder="D"
+                                      value={statusInputs[prog.id]?.dogru ?? prog.dogru ?? ''}
+                                      onChange={(e) => handleResultChange(prog.id, 'dogru', e.target.value)}
+                                      onBlur={() => handleResultBlur(prog)}
+                                      title="Doğru"
+                                    />
+                                    <input 
+                                      className="result-box incorrect"
+                                      placeholder="Y"
+                                      value={statusInputs[prog.id]?.yanlis ?? prog.yanlis ?? ''}
+                                      onChange={(e) => handleResultChange(prog.id, 'yanlis', e.target.value)}
+                                      onBlur={() => handleResultBlur(prog)}
+                                      title="Yanlış"
+                                    />
+                                    <input 
+                                      className="result-box empty"
+                                      placeholder="B"
+                                      value={statusInputs[prog.id]?.bos ?? prog.bos ?? ''}
+                                      onChange={(e) => handleResultChange(prog.id, 'bos', e.target.value)}
+                                      onBlur={() => handleResultBlur(prog)}
+                                      title="Boş"
+                                    />
+                                  </div>
                                 )}
-                              </div>
-                            )}
-                            {prog.aciklama && (
+                            </div>
+                            
+                            {prog.aciklama ? (
                               <div 
                                 className={`program-item-aciklama ${expandedAciklama.has(prog.id) ? 'expanded' : ''}`}
                                 onClick={(e) => {
@@ -3209,8 +3271,11 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                 }}
                                 title="Tıklayarak genişlet/küçült"
                               >
-                                💬 {prog.aciklama}
+                                <span className="aciklama-icon">💬</span>
+                                <span className="aciklama-text">{prog.aciklama}</span>
                               </div>
+                            ) : (
+                              <div style={{ height: '28px' }}></div>
                             )}
                             {prog.youtube_linki && (
                               <div className="program-item-youtube-link" style={{marginTop: 6}}>
