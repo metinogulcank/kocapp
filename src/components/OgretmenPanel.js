@@ -88,6 +88,50 @@ const safeFetchJson = async (url, options = {}) => {
   }
 };
 
+const getSubjectIcon = (ders) => {
+  const iconMap = {
+    'TYT Matematik': tumMatematikImg,
+    'TYT Geometri': tumGeometriImg,
+    'TYT Türkçe': tumTurkceImg,
+    'TYT Fizik': tumFizikImg,
+    'TYT Kimya': tumKimyaImg,
+    'TYT Biyoloji': tumBiyolojiImg,
+    'TYT Tarih': tarihImg,
+    'TYT Coğrafya': cografyaImg,
+    'TYT Felsefe': felsefeImg,
+    'AYT Matematik': tumMatematikImg,
+    'AYT Geometri': tumGeometriImg,
+    'AYT Fizik': tumFizikImg,
+    'AYT Kimya': tumKimyaImg,
+    'AYT Biyoloji': tumBiyolojiImg,
+    'AYT Edebiyat': edebiyatImg,
+    'AYT Tarih': tarihImg,
+    'AYT Coğrafya': cografyaImg,
+    'AYT Felsefe': felsefeImg,
+    'LGS Matematik': tumMatematikImg,
+    'LGS Fen': lgsFenImg,
+    'LGS Türkçe': tumTurkceImg,
+    'LGS İnkılap': lgsInkilapImg,
+    'LGS Din': dinImg,
+    'LGS İngilizce': tumIngilizceImg,
+    'Matematik': tumMatematikImg,
+    'Geometri': tumGeometriImg,
+    'Türkçe': tumTurkceImg,
+    'Fizik': tumFizikImg,
+    'Kimya': tumKimyaImg,
+    'Biyoloji': tumBiyolojiImg,
+    'Tarih': tarihImg,
+    'Coğrafya': cografyaImg,
+    'Felsefe': felsefeImg,
+    'Fen Bilimleri': lgsFenImg,
+    'Fen': lgsFenImg,
+    'İnkılap Tarihi': lgsInkilapImg,
+    'Din Kültürü': dinImg,
+    'İngilizce': tumIngilizceImg
+  };
+  return iconMap[ders] || null;
+};
+
 // Alan kodunu (yks_say vb.) okunur etikete çevir 
 const formatAreaLabel = (area, studentInfo = null) => {
   // 1. Backend'den gelen hazır ismi kullan (En güvenilir yol)
@@ -857,6 +901,12 @@ const MEETING_DAY_OPTIONS = [
     return null;
   };
 
+  const getSubjectIconForExam = (examCompId, subjectName) => {
+    const examIcon = getExamSubjectIconUrl(examCompId, subjectName);
+    const resolved = resolveIconUrl(examIcon);
+    return resolved || getSubjectIcon(subjectName);
+  };
+
   const bransDersList = getDersList(bransExamType, selectedStudent?.alan);
   const bransHasSubjects = bransDersList.length > 0;
 
@@ -1624,15 +1674,31 @@ const MEETING_DAY_OPTIONS = [
       );
       
       if (data.success && data.programs) {
-        // Seçili bileşene göre ders listesini al
         const selectedComp = examComponents.find(c => c.id === dersBasariExamType);
-        let studentSubjects = [];
+        let rawSubjects = [];
         
         if (selectedComp && selectedComp.dersler) {
-          studentSubjects = selectedComp.dersler;
+          rawSubjects = selectedComp.dersler;
         } else if (examComponents.length > 0) {
-          studentSubjects = examComponents[0].dersler || [];
+          rawSubjects = examComponents[0].dersler || [];
         }
+
+        const normalizeSubjectName = (subject) => {
+          if (!subject) return '';
+          if (typeof subject === 'string') return subject;
+          if (typeof subject === 'object') {
+            if (subject.ders_adi) return subject.ders_adi;
+            if (subject.dersAdi) return subject.dersAdi;
+            if (subject.name) return subject.name;
+            if (subject.label) return subject.label;
+            if (subject.title) return subject.title;
+          }
+          return String(subject);
+        };
+
+        const studentSubjects = rawSubjects
+          .map(normalizeSubjectName)
+          .filter(Boolean);
         
         const dersStats = {};
         const dersDetailMap = {}; // Her ders için konu detayları
@@ -1743,7 +1809,6 @@ const MEETING_DAY_OPTIONS = [
     const studentIdForPayload = selectedStudent?.id || selectedStudent?.studentId || selectedStudent?.student_id;
     const dersForPayload = (selectedDersForIlerleme || '').trim();
     if (!studentIdForPayload || !dersForPayload) {
-      console.warn('Konu ilerlemesi çağrısı atlandı: eksik studentId/ders', { studentIdForPayload, dersForPayload });
       return;
     }
     setKonuIlerlemesiLoading(true);
@@ -1751,60 +1816,118 @@ const MEETING_DAY_OPTIONS = [
       const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
       );
-      
-      if (data.success && data.konular && data.konular.length > 0) {
-        // Backend zaten sira’ya göre sıralı dönüyor, direkt set et
-        setKonuIlerlemesi(data.konular);
-      } else {
-        // Eğer öğrencinin bu ders için kaydedilmiş ilerlemesi yoksa, 
-        // bu dersin varsayılan konularını sinav_konulari tablosundan çekelim
-        const subject = dynamicSubjectsForIlerleme.find(s => s.ders_adi === dersForPayload);
-        
-        if (subject && subject.id) {
-          try {
-            const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}`);
-            if (topicsData.success && topicsData.topics && topicsData.topics.length > 0) {
-              // Ders seviyesindeki kaynakları çek
-              let dersResources = [];
-              try {
-                const resourcesData = await safeFetchJson(`${API_BASE}/php-backend/api/get_resources.php?ders_id=${encodeURIComponent(subject.id)}`);
-                if (resourcesData.success && Array.isArray(resourcesData.resources)) {
-                  dersResources = resourcesData.resources.map(r => ({
-                    kaynak_adi: r.kaynak_adi,
-                    tamamlandi: false
-                  }));
-                }
-              } catch (resErr) {
-                // kaynaklar yüklenemese de konular görüntülenir
+      const existingKonular = data.success && Array.isArray(data.konular) ? data.konular : [];
+      let finalKonular = existingKonular;
+
+      const subject = dynamicSubjectsForIlerleme.find(s => s.ders_adi === dersForPayload);
+
+      if (subject && subject.id) {
+        try {
+          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}`);
+          if (topicsData.success && Array.isArray(topicsData.topics) && topicsData.topics.length > 0) {
+            let dersResources = [];
+            try {
+              const resourcesData = await safeFetchJson(`${API_BASE}/php-backend/api/get_resources.php?ders_id=${encodeURIComponent(subject.id)}`);
+              if (resourcesData.success && Array.isArray(resourcesData.resources)) {
+                dersResources = resourcesData.resources.map(r => ({
+                  kaynak_adi: r.kaynak_adi,
+                  tamamlandi: false
+                }));
               }
-              const defaultKonular = topicsData.topics.map((t, i) => ({
+            } catch (resErr) {}
+
+            const normalize = (v) => (v || '').trim().toLowerCase();
+            const existingMap = new Map();
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              if (key && !existingMap.has(key)) {
+                existingMap.set(key, k);
+              }
+            });
+
+            const merged = topicsData.topics.map((t, index) => {
+              const konuAdi = t.konu_adi;
+              const key = normalize(konuAdi);
+              const existing = key ? existingMap.get(key) : null;
+
+              let kaynaklar = dersResources.map(r => ({ ...r }));
+              if (existing && Array.isArray(existing.kaynaklar) && existing.kaynaklar.length > 0) {
+                const existingByName = new Map();
+                existing.kaynaklar.forEach(res => {
+                  const kKey = normalize(res.kaynak_adi);
+                  if (kKey && !existingByName.has(kKey)) {
+                    existingByName.set(kKey, res);
+                  }
+                });
+                const mergedResources = [];
+                dersResources.forEach(dr => {
+                  const dKey = normalize(dr.kaynak_adi);
+                  const ex = dKey ? existingByName.get(dKey) : null;
+                  if (ex) {
+                    mergedResources.push(ex);
+                  } else {
+                    mergedResources.push({ ...dr });
+                  }
+                });
+                existing.kaynaklar.forEach(res => {
+                  const rKey = normalize(res.kaynak_adi);
+                  if (!rKey) return;
+                  const inBase = dersResources.some(dr => normalize(dr.kaynak_adi) === rKey);
+                  if (!inBase) {
+                    mergedResources.push(res);
+                  }
+                });
+                kaynaklar = mergedResources;
+              }
+
+              if (existing) {
+                return {
+                  ...existing,
+                  konu: konuAdi,
+                  sira: t.sira || existing.sira || index + 1,
+                  kaynaklar
+                };
+              }
+
+              return {
                 id: null,
-                konu: t.konu_adi,
-                sira: t.sira || (i + 1),
+                konu: konuAdi,
+                sira: t.sira || index + 1,
                 durum: 'Konuya Gelinmedi',
                 tarih: null,
-                kaynaklar: dersResources.map(r => ({ ...r }))
-              }));
-              setKonuIlerlemesi(defaultKonular);
-              setKonuIlerlemesiLoading(false);
-              return;
-            }
-          } catch (topicErr) {
-            console.error('Varsayılan konular çekilemedi:', topicErr);
-          }
-        }
+                kaynaklar
+              };
+            });
 
-        // Eğer dinamik konu bulunamazsa veya hata oluşursa eski fallback (Konu 1, 2...)
-        const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
-          id: null,
-          konu: `Konu ${i + 1}`,
-          sira: i + 1,
-          durum: 'Konuya Gelinmedi',
-          tarih: null,
-          kaynaklar: []
-        }));
-        setKonuIlerlemesi(defaultKonular);
+            const usedKeys = new Set(topicsData.topics.map(t => normalize(t.konu_adi)));
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              if (key && !usedKeys.has(key)) {
+                merged.push(k);
+              }
+            });
+
+            finalKonular = merged;
+          }
+        } catch (topicErr) {
+          console.error('Varsayılan konular çekilemedi:', topicErr);
+        }
       }
+
+      if (finalKonular.length > 0) {
+        setKonuIlerlemesi(finalKonular);
+        return;
+      }
+
+      const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
+        id: null,
+        konu: `Konu ${i + 1}`,
+        sira: i + 1,
+        durum: 'Konuya Gelinmedi',
+        tarih: null,
+        kaynaklar: []
+      }));
+      setKonuIlerlemesi(defaultKonular);
     } catch (err) {
       console.error('Konu ilerlemesi yüklenemedi:', err);
       // Hata durumunda da default konular oluştur
@@ -4053,7 +4176,7 @@ const MEETING_DAY_OPTIONS = [
                         <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16}}>
                           {getDersList(selectedExamArea).map((subject) => {
                             const hasPrograms = allPrograms.some(prog => prog.ders === subject);
-                            const iconSrc = resolveIconUrl(getExamSubjectIconUrl(selectedExamArea, subject)) || getSubjectIcon(subject);
+                            const iconSrc = getSubjectIconForExam(selectedExamArea, subject);
                             
                             return (
                               <button
@@ -5099,7 +5222,7 @@ const MEETING_DAY_OPTIONS = [
                             Dersler yükleniyor...
                           </div>
                         ) : selectedStudent && getDersList(ilerlemeExamType).map((ders) => {
-                            const iconSrc = getSubjectIcon(ders);
+                            const iconSrc = getSubjectIconForExam(ilerlemeExamType, ders);
                             return (
                               <div
                                 key={ders}
@@ -5174,10 +5297,10 @@ const MEETING_DAY_OPTIONS = [
                             <FontAwesomeIcon icon={faChevronLeft} />
                             Geri
                           </button>
-                          <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-                            {getSubjectIcon(selectedDersForIlerleme) && (
+                            <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+                            {getSubjectIconForExam(ilerlemeExamType, selectedDersForIlerleme) && (
                               <img
-                                src={getSubjectIcon(selectedDersForIlerleme)}
+                                src={getSubjectIconForExam(ilerlemeExamType, selectedDersForIlerleme)}
                                 alt={selectedDersForIlerleme}
                                 style={{
                                   width: 32,

@@ -1150,16 +1150,31 @@ const OgrenciPanel = () => {
         `${API_BASE}/php-backend/api/get_student_program.php?studentId=${studentId}&startDate=2020-01-01&endDate=2099-12-31`
       );
       if (data.success && data.programs) {
-        // Seçili bileşene göre ders listesini al
         const selectedComp = examComponents.find(c => c.id === dersBasariExamType);
-        let studentSubjects = [];
+        let rawSubjects = [];
         
         if (selectedComp && selectedComp.dersler) {
-          studentSubjects = selectedComp.dersler;
+          rawSubjects = selectedComp.dersler;
         } else if (examComponents.length > 0) {
-          // Eğer seçili bileşen yoksa ama bileşenler varsa, ilkini kullan
-          studentSubjects = examComponents[0].dersler || [];
+          rawSubjects = examComponents[0].dersler || [];
         }
+
+        const normalizeSubjectName = (subject) => {
+          if (!subject) return '';
+          if (typeof subject === 'string') return subject;
+          if (typeof subject === 'object') {
+            if (subject.ders_adi) return subject.ders_adi;
+            if (subject.dersAdi) return subject.dersAdi;
+            if (subject.name) return subject.name;
+            if (subject.label) return subject.label;
+            if (subject.title) return subject.title;
+          }
+          return String(subject);
+        };
+
+        const studentSubjects = rawSubjects
+          .map(normalizeSubjectName)
+          .filter(Boolean);
 
         const stats = {};
         const dersDetailMap = {};
@@ -3292,10 +3307,10 @@ const OgrenciPanel = () => {
                     }}>
                       {Object.entries(dersBasariStats).map(([ders, stats]) => {
                         const iconSrc = getSubjectIcon(ders, allSubjects);
-                        const yapildiPercent = stats.yapildiPercent;
+                        const basariYuzdesi = stats.basariYuzdesi || 0;
                         const hasProgram = stats.total > 0;
                         const progressColor = hasProgram 
-                          ? (yapildiPercent >= 75 ? '#10b981' : yapildiPercent >= 50 ? '#f59e0b' : '#ef4444')
+                          ? (basariYuzdesi >= 75 ? '#10b981' : basariYuzdesi >= 50 ? '#f59e0b' : '#ef4444')
                           : '#9ca3af';
 
                         return (
@@ -3373,7 +3388,7 @@ const OgrenciPanel = () => {
                                   fontWeight: 700,
                                   color: progressColor
                                 }}>
-                                  {hasProgram ? `%${yapildiPercent}` : '-'}
+                                  {hasProgram ? `%${basariYuzdesi}` : '-'}
                                 </span>
                               </div>
                               <div style={{
@@ -3384,7 +3399,7 @@ const OgrenciPanel = () => {
                                 overflow: 'hidden'
                               }}>
                                 <div style={{
-                                  width: `${yapildiPercent}%`,
+                                  width: `${basariYuzdesi}%`,
                                   height: '100%',
                                   background: `linear-gradient(90deg, ${progressColor}, ${progressColor}dd)`,
                                   transition: 'width 0.3s ease'
