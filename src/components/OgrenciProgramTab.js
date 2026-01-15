@@ -3382,7 +3382,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                           {/* Details section: Kaynak, Açıklama, Soru Sayısı */}
                           <div className="program-item-details">
                             <div className="program-item-kaynak-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%', gap: 4, minHeight: 24 }}>
-                                {(prog.program_tipi === 'soru_cozum' || prog.program_tipi === 'konu_anlatim') && (
+                                {(prog.program_tipi === 'soru_cozum' || prog.program_tipi === 'deneme') && (
                                   <div className="result-inputs" onClick={(e) => e.stopPropagation()}>
                                     <input 
                                       className="result-box correct"

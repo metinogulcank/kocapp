@@ -450,11 +450,11 @@
   backdrop-filter: blur(20px) saturate(200%);
   -webkit-backdrop-filter: blur(20px) saturate(200%);
   border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2),
               inset 0 1px 0 rgba(255, 255, 255, 0.3),
               inset 0 -1px 0 rgba(255, 255, 255, 0.1);
   /* Gradient background is set inline via style prop */
-  min-height: 170px;
+  min-height: 190px;
   justify-content: space-between;
 }
 
@@ -737,6 +737,7 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
+  min-height: 72px;
 }
 
 .program-item-status-wrapper {
@@ -965,6 +966,55 @@
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.routine-modal {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.routine-modal .modal-header {
+  padding: 8px 12px;
+  border-bottom: none;
+}
+
+.routine-modal .modal-header h3 {
+  display: none;
+}
+
+.routine-modal .program-form {
+  padding: 12px 16px 16px;
+}
+
+.routine-modal .form-group {
+  margin-bottom: 10px;
+}
+
+.routine-modal .form-group label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.routine-modal .form-group input,
+.routine-modal .form-group select,
+.routine-modal .form-group textarea {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.routine-modal .form-row {
+  gap: 8px;
+}
+
+.routine-modal .form-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.routine-modal .cancel-btn,
+.routine-modal .save-btn {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .template-modal {
@@ -1491,20 +1541,22 @@
 }
 
 .routine-days-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  gap: 4px;
 }
 
 .routine-day-option {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 0;
+  padding: 6px 0;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
-  gap: 8px;
+  border-radius: 6px;
+  gap: 4px;
   font-weight: 600;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -1598,8 +1650,13 @@
   }
 
   .program-item-print .program-item-aciklama {
-    max-height: none !important;
+    max-height: 60px !important;
+    overflow: hidden !important;
     background: rgba(255, 255, 255, 0.35);
+  }
+
+  .program-item-print .aciklama-text {
+    -webkit-line-clamp: 3;
   }
 
   .program-item-print .program-item-durum {
@@ -2073,6 +2130,7 @@
     padding: 10px;
     font-size: 11px;
     margin-bottom: 6px;
+    min-height: 190px;
   }
 
   .program-item-time {
@@ -2167,6 +2225,7 @@
   .program-item {
     padding: 8px;
     font-size: 10px;
+    min-height: 190px;
   }
 
   .program-item-time {
