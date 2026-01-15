@@ -1325,56 +1325,120 @@ const VeliPanel = () => {
   };
   
   const calculateGenelDenemeOrtalamalari = useMemo(() => {
-    if (!genelDenemeList || genelDenemeList.length === 0) {
+    if (!genelDenemeList || genelDenemeList.length === 0 || !examComponents || examComponents.length === 0) {
       const emptyRes = {};
-      examComponents.forEach(c => emptyRes[c.id] = 0);
+      examComponents.forEach(c => {
+        emptyRes[c.id] = 0;
+      });
       return emptyRes;
     }
-    let filteredDenemeler = [...genelDenemeList];
-    if (genelDenemeFilter === 'son-3') {
-      filteredDenemeler = filteredDenemeler.slice(0, 3);
-    } else if (genelDenemeFilter === 'son-5') {
-      filteredDenemeler = filteredDenemeler.slice(0, 5);
-    } else if (genelDenemeFilter === 'son-10') {
-      filteredDenemeler = filteredDenemeler.slice(0, 10);
-    } else if (genelDenemeFilter === 'tum-denemeler') {
-      filteredDenemeler = filteredDenemeler;
-    } else {
-      filteredDenemeler = filteredDenemeler.slice(0, 1);
-    }
 
-    const componentStats = {};
-    examComponents.forEach(c => {
-      componentStats[c.id] = { totalNet: 0, count: 0 };
-    });
+    const results = {};
 
-    filteredDenemeler.forEach((deneme) => {
-      const sinavTipi = deneme.sinavTipi;
-      if (!componentStats[sinavTipi]) return;
+    examComponents.forEach((comp) => {
+      const compDenemeler = [];
 
-      const dersSonuclari = deneme.dersSonuclari || {};
-      const component = examComponents.find(c => c.id === sinavTipi);
-      const componentDersler = component ? (component.dersler || []) : [];
+      genelDenemeList.forEach((deneme) => {
+        const dersSonuclari = deneme.dersSonuclari || {};
+        const denemeSinavTipi = deneme.sinav_tipi || deneme.sinavTipi;
+        const componentDersler = comp.dersler || [];
 
-      let toplamNet = 0;
-      Object.entries(dersSonuclari).forEach(([ders, data]) => {
-        if (componentDersler.includes(ders)) {
-          let netValue = 0;
-          if (data && data.net !== undefined && data.net !== null) {
-            netValue = parseFloat(data.net) || 0;
+        let matchesComponent = false;
+
+        if (componentDersler && componentDersler.length > 0) {
+          Object.keys(dersSonuclari).forEach((ders) => {
+            if (componentDersler.includes(ders)) {
+              matchesComponent = true;
+            }
+          });
+
+          if (!matchesComponent && denemeSinavTipi && denemeSinavTipi === comp.id) {
+            matchesComponent = true;
           }
-          toplamNet += netValue;
+        } else if (denemeSinavTipi && denemeSinavTipi === comp.id) {
+          matchesComponent = true;
+        }
+
+        if (matchesComponent) {
+          compDenemeler.push(deneme);
         }
       });
 
-      componentStats[sinavTipi].totalNet += toplamNet;
-      componentStats[sinavTipi].count++;
-    });
+      if (compDenemeler.length === 0) {
+        results[comp.id] = 0;
+        return;
+      }
 
-    const results = {};
-    examComponents.forEach(c => {
-      const stats = componentStats[c.id];
-      results[c.id] = stats.count > 0 ? parseFloat((stats.totalNet / stats.count).toFixed(2)) : 0;
+      let filtered = [...compDenemeler];
+      if (genelDenemeFilter === 'son-3') {
+        filtered = filtered.slice(0, 3);
+      } else if (genelDenemeFilter === 'son-5') {
+        filtered = filtered.slice(0, 5);
+      } else if (genelDenemeFilter === 'son-10') {
+        filtered = filtered.slice(0, 10);
+      } else if (genelDenemeFilter === 'tum-denemeler') {
+        filtered = filtered;
+      } else {
+        filtered = filtered.slice(0, 1);
+      }
+
+      if (filtered.length === 0) {
+        results[comp.id] = 0;
+        return;
+      }
+
+      let totalNet = 0;
+      let count = 0;
+
+      filtered.forEach((deneme) => {
+        const dersSonuclari = deneme.dersSonuclari || {};
+        const denemeSinavTipi = deneme.sinav_tipi || deneme.sinavTipi;
+        const componentDersler = comp.dersler || [];
+
+        let toplamNet = 0;
+        let hasMatch = false;
+
+        if (!componentDersler || componentDersler.length === 0) {
+          if (denemeSinavTipi && denemeSinavTipi === comp.id) {
+            hasMatch = true;
+            Object.values(dersSonuclari).forEach((data) => {
+              if (data && data.net !== undefined && data.net !== null) {
+                toplamNet += parseFloat(data.net) || 0;
+              }
+            });
+          }
+        } else {
+          Object.entries(dersSonuclari).forEach(([ders, data]) => {
+            if (componentDersler.includes(ders)) {
+              hasMatch = true;
+              let netValue = 0;
+              if (data && data.net !== undefined && data.net !== null) {
+                netValue = parseFloat(data.net) || 0;
+              }
+              toplamNet += netValue;
+            }
+          });
+
+          if (!hasMatch && denemeSinavTipi && denemeSinavTipi === comp.id) {
+            Object.values(dersSonuclari).forEach((data) => {
+              if (!data) return;
+              let netValue = 0;
+              if (data.net !== undefined && data.net !== null) {
+                netValue = parseFloat(data.net) || 0;
+              }
+              toplamNet += netValue;
+              hasMatch = true;
+            });
+          }
+        }
+
+        if (hasMatch) {
+          totalNet += toplamNet;
+          count += 1;
+        }
+      });
+
+      results[comp.id] = count > 0 ? parseFloat((totalNet / count).toFixed(2)) : 0;
     });
 
     return results;

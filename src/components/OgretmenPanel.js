@@ -823,6 +823,13 @@ const MEETING_DAY_OPTIONS = [
     }
     return found || null;
   };
+  const ensureBransDersSelected = () => {
+    if (!bransDenemeForm.ders) {
+      alert('Lütfen ders seçiniz');
+      return false;
+    }
+    return true;
+  };
   
   useEffect(() => {
     const fetchGenelDenemeSubjects = async () => {
@@ -2484,79 +2491,133 @@ const MEETING_DAY_OPTIONS = [
     }
   };
 
-  // TYT, AYT ve diğer sınav tipleri için ortalamaları hesapla
   const calculateGenelDenemeOrtalamalari = useMemo(() => {
-    if (!genelDenemeList || genelDenemeList.length === 0) {
+    if (!genelDenemeList || genelDenemeList.length === 0 || !examComponents || examComponents.length === 0) {
       const emptyRes = {};
-      examComponents.forEach(c => emptyRes[c.id] = 0);
+      examComponents.forEach(c => {
+        emptyRes[c.id] = 0;
+      });
+      emptyRes.digerOrtalama = 0;
       return emptyRes;
     }
-
-    // Filtreye göre denemeleri al
-    let filteredDenemeler = [...genelDenemeList];
-    if (genelDenemeFilter === 'son-3') {
-      filteredDenemeler = filteredDenemeler.slice(0, 3);
-    } else if (genelDenemeFilter === 'son-5') {
-      filteredDenemeler = filteredDenemeler.slice(0, 5);
-    } else if (genelDenemeFilter === 'son-10') {
-      filteredDenemeler = filteredDenemeler.slice(0, 10);
-    } else if (genelDenemeFilter === 'tum-denemeler') {
-      filteredDenemeler = filteredDenemeler;
-    } else {
-      filteredDenemeler = filteredDenemeler.slice(0, 1);
-    }
-
-    const componentStats = {};
-    examComponents.forEach(c => {
-      componentStats[c.id] = { totalNet: 0, count: 0 };
-    });
-
-    filteredDenemeler.forEach((deneme) => {
-      const sinavTipi = deneme.sinavTipi;
-      if (!componentStats[sinavTipi]) return;
-
-      const dersSonuclari = deneme.dersSonuclari || {};
-      const component = examComponents.find(c => c.id === sinavTipi);
-      const componentDersler = component ? (component.dersler || []) : [];
-
-      let toplamNet = 0;
-      Object.entries(dersSonuclari).forEach(([ders, data]) => {
-        if (componentDersler.includes(ders)) {
-          let netValue = 0;
-          if (data && data.net !== undefined && data.net !== null) {
-            netValue = parseFloat(data.net) || 0;
-          }
-          toplamNet += netValue;
-        }
-      });
-
-      componentStats[sinavTipi].totalNet += toplamNet;
-      componentStats[sinavTipi].count++;
-    });
 
     const results = {};
     let totalAllNet = 0;
     let totalAllCount = 0;
 
-    examComponents.forEach(c => {
-      const stats = componentStats[c.id];
-      const avg = stats.count > 0 ? parseFloat((stats.totalNet / stats.count).toFixed(2)) : 0;
-      results[c.id] = avg;
-      totalAllNet += stats.totalNet;
-      totalAllCount += stats.count;
+    examComponents.forEach((comp) => {
+      const compDenemeler = [];
+
+      genelDenemeList.forEach((deneme) => {
+        const dersSonuclari = deneme.dersSonuclari || {};
+        const denemeSinavTipi = deneme.sinav_tipi || deneme.sinavTipi;
+        const componentDersler = comp.dersler || [];
+
+        let matchesComponent = false;
+
+        if (componentDersler && componentDersler.length > 0) {
+          Object.keys(dersSonuclari).forEach((ders) => {
+            if (componentDersler.includes(ders)) {
+              matchesComponent = true;
+            }
+          });
+
+          if (!matchesComponent && denemeSinavTipi && denemeSinavTipi === comp.id) {
+            matchesComponent = true;
+          }
+        } else if (denemeSinavTipi && denemeSinavTipi === comp.id) {
+          matchesComponent = true;
+        }
+
+        if (matchesComponent) {
+          compDenemeler.push(deneme);
+        }
+      });
+
+      if (compDenemeler.length === 0) {
+        results[comp.id] = 0;
+        return;
+      }
+
+      let filtered = [...compDenemeler];
+      if (genelDenemeFilter === 'son-3') {
+        filtered = filtered.slice(0, 3);
+      } else if (genelDenemeFilter === 'son-5') {
+        filtered = filtered.slice(0, 5);
+      } else if (genelDenemeFilter === 'son-10') {
+        filtered = filtered.slice(0, 10);
+      } else if (genelDenemeFilter === 'tum-denemeler') {
+        filtered = filtered;
+      } else {
+        filtered = filtered.slice(0, 1);
+      }
+
+      if (filtered.length === 0) {
+        results[comp.id] = 0;
+        return;
+      }
+
+      let totalNet = 0;
+      let count = 0;
+
+      filtered.forEach((deneme) => {
+        const dersSonuclari = deneme.dersSonuclari || {};
+        const denemeSinavTipi = deneme.sinav_tipi || deneme.sinavTipi;
+        const componentDersler = comp.dersler || [];
+
+        let toplamNet = 0;
+        let hasMatch = false;
+
+        if (!componentDersler || componentDersler.length === 0) {
+          if (denemeSinavTipi && denemeSinavTipi === comp.id) {
+            hasMatch = true;
+            Object.values(dersSonuclari).forEach((data) => {
+              if (data && data.net !== undefined && data.net !== null) {
+                toplamNet += parseFloat(data.net) || 0;
+              }
+            });
+          }
+        } else {
+          Object.entries(dersSonuclari).forEach(([ders, data]) => {
+            if (componentDersler.includes(ders)) {
+              hasMatch = true;
+              let netValue = 0;
+              if (data && data.net !== undefined && data.net !== null) {
+                netValue = parseFloat(data.net) || 0;
+              }
+              toplamNet += netValue;
+            }
+          });
+
+          if (!hasMatch && denemeSinavTipi && denemeSinavTipi === comp.id) {
+            Object.values(dersSonuclari).forEach((data) => {
+              if (!data) return;
+              let netValue = 0;
+              if (data.net !== undefined && data.net !== null) {
+                netValue = parseFloat(data.net) || 0;
+              }
+              toplamNet += netValue;
+              hasMatch = true;
+            });
+          }
+        }
+
+        if (hasMatch) {
+          totalNet += toplamNet;
+          count += 1;
+        }
+      });
+
+      const avg = count > 0 ? parseFloat((totalNet / count).toFixed(2)) : 0;
+      results[comp.id] = avg;
+      totalAllNet += totalNet;
+      totalAllCount += count;
     });
 
-    // Fallback if no components match or for general average
-    if (totalAllCount === 0 && filteredDenemeler.length > 0) {
-      let generalNet = 0;
-      filteredDenemeler.forEach(d => {
-        Object.values(d.dersSonuclari || {}).forEach(data => {
-          generalNet += parseFloat(data.net) || 0;
-        });
-      });
-      results.digerOrtalama = parseFloat((generalNet / filteredDenemeler.length).toFixed(2));
+    if (totalAllCount > 0) {
+      results.digerOrtalama = parseFloat((totalAllNet / totalAllCount).toFixed(2));
     } else {
-      results.digerOrtalama = totalAllCount > 0 ? parseFloat((totalAllNet / totalAllCount).toFixed(2)) : 0;
+      results.digerOrtalama = 0;
     }
 
     return results;
@@ -5845,7 +5906,10 @@ const MEETING_DAY_OPTIONS = [
                                 type="number"
                                 min="0"
                                 value={bransDenemeForm[field]}
-                                onChange={(e) => handleBransFormChange(field, e.target.value)}
+                                onChange={(e) => {
+                                  if (!ensureBransDersSelected()) return;
+                                  handleBransFormChange(field, e.target.value);
+                                }}
                                 style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
                               />
                         </div>
@@ -5860,13 +5924,13 @@ const MEETING_DAY_OPTIONS = [
 
                       <button
                         onClick={() => {
+                          if (!ensureBransDersSelected()) return;
                           const next = !bransKonuDetayAcik;
                           setBransKonuDetayAcik(next);
                           if (next && bransKonular.length === 0 && bransDenemeForm.ders) {
                             fetchBransKonular(bransDenemeForm.ders);
                           }
                         }}
-                        disabled={!bransDenemeForm.ders}
                         style={{
                           marginBottom: 12,
                           padding: '10px 12px',
@@ -5874,7 +5938,7 @@ const MEETING_DAY_OPTIONS = [
                           border: '1px solid #e5e7eb',
                           background: bransKonuDetayAcik ? '#eef2ff' : 'white',
                           color: '#111827',
-                          cursor: bransDenemeForm.ders ? 'pointer' : 'not-allowed'
+                          cursor: bransDenemeForm.ders ? 'pointer' : 'pointer'
                         }}
                       >
                         Yanlış / Boş Konuları Gir
