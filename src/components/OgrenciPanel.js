@@ -43,6 +43,7 @@ import tumIngilizceImg from '../assets/tum_ingilizce.png';
 import tumKimyaImg from '../assets/tum_kimya.png';
 import tumMatematikImg from '../assets/tum_matematik.png';
 import tumTurkceImg from '../assets/tum_turkce.png';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
 const API_UPDATE_STUDENT = `${API_BASE}/php-backend/api/update_student.php`;
@@ -373,6 +374,13 @@ const OgrenciPanel = () => {
     return null;
   };
 
+  const getSubjectIconForExam = (examCompId, subjectName) => {
+    const examIcon = getExamSubjectIconUrl(examCompId, subjectName);
+    const resolved = resolveIconUrl(examIcon);
+    if (resolved) return resolved;
+    return getSubjectIcon(subjectName, allSubjects);
+  };
+
   // Öğrencinin sınav bileşenlerini çek
   const fetchExamComponents = async (studentId) => {
     if (!studentId) return;
@@ -611,9 +619,10 @@ const OgrenciPanel = () => {
     }
   }, [selectedSubject, allPrograms]);
 
-  const fetchStudentSubjects = async (studentId) => {
+  const fetchStudentSubjects = async (area) => {
+    if (!area) return;
     try {
-      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?studentId=${studentId}`);
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?alan=${encodeURIComponent(area)}`);
       if (data.success && data.subjects) {
         setAllSubjects(data.subjects);
       }
@@ -624,10 +633,12 @@ const OgrenciPanel = () => {
 
   const fetchStudentInfo = async (studentId) => {
     try {
-      fetchStudentSubjects(studentId);
       const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_info.php?studentId=${studentId}`);
       if (data.success && data.student) {
         setStudent(data.student);
+        if (data.student.alan) {
+          fetchStudentSubjects(data.student.alan);
+        }
         
         // Profil formunu doldur
         setProfileForm(prev => ({
@@ -1397,7 +1408,6 @@ const OgrenciPanel = () => {
     }
   };
 
-  // Konu İlerlemesi - Veri çekme
   const fetchKonuIlerlemesi = async () => {
     const studentIdForPayload = student?.id;
     const dersForPayload = (selectedDersForIlerleme || '').trim();
@@ -1409,20 +1419,118 @@ const OgrenciPanel = () => {
       const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
       );
-      
-      if (data.success && data.konular && data.konular.length > 0) {
-        setKonuIlerlemesi(data.konular);
-      } else {
-        const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
-          id: null,
-          konu: `Konu ${i + 1}`,
-          sira: i + 1,
-          durum: 'Konuya Gelinmedi',
-          tarih: null,
-          kaynaklar: []
-        }));
-        setKonuIlerlemesi(defaultKonular);
+      const existingKonular = data.success && Array.isArray(data.konular) ? data.konular : [];
+      let finalKonular = existingKonular;
+
+      const subjectMeta = findSubjectMetaByName(dersForPayload);
+
+      if (subjectMeta && subjectMeta.id) {
+        try {
+          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subjectMeta.id)}`);
+          if (topicsData.success && Array.isArray(topicsData.topics) && topicsData.topics.length > 0) {
+            let dersResources = [];
+            try {
+              const resourcesData = await safeFetchJson(`${API_BASE}/php-backend/api/get_resources.php?ders_id=${encodeURIComponent(subjectMeta.id)}`);
+              if (resourcesData.success && Array.isArray(resourcesData.resources)) {
+                dersResources = resourcesData.resources.map(r => ({
+                  kaynak_adi: r.kaynak_adi,
+                  tamamlandi: false
+                }));
+              }
+            } catch (resErr) {}
+
+            const normalize = (v) => (v || '').trim().toLowerCase();
+            const existingMap = new Map();
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              if (key && !existingMap.has(key)) {
+                existingMap.set(key, k);
+              }
+            });
+
+            const merged = topicsData.topics.map((t, index) => {
+              const konuAdi = t.konu_adi;
+              const key = normalize(konuAdi);
+              const existing = key ? existingMap.get(key) : null;
+
+              let kaynaklar = dersResources.map(r => ({ ...r }));
+              if (existing && Array.isArray(existing.kaynaklar) && existing.kaynaklar.length > 0) {
+                const existingByName = new Map();
+                existing.kaynaklar.forEach(res => {
+                  const kKey = normalize(res.kaynak_adi);
+                  if (kKey && !existingByName.has(kKey)) {
+                    existingByName.set(kKey, res);
+                  }
+                });
+                const mergedResources = [];
+                dersResources.forEach(dr => {
+                  const dKey = normalize(dr.kaynak_adi);
+                  const ex = dKey ? existingByName.get(dKey) : null;
+                  if (ex) {
+                    mergedResources.push(ex);
+                  } else {
+                    mergedResources.push({ ...dr });
+                  }
+                });
+                existing.kaynaklar.forEach(res => {
+                  const rKey = normalize(res.kaynak_adi);
+                  if (!rKey) return;
+                  const inBase = dersResources.some(dr => normalize(dr.kaynak_adi) === rKey);
+                  if (!inBase) {
+                    mergedResources.push(res);
+                  }
+                });
+                kaynaklar = mergedResources;
+              }
+
+              if (existing) {
+                return {
+                  ...existing,
+                  konu: konuAdi,
+                  sira: t.sira || existing.sira || index + 1,
+                  kaynaklar
+                };
+              }
+
+              return {
+                id: null,
+                konu: konuAdi,
+                sira: t.sira || index + 1,
+                durum: 'Konuya Gelinmedi',
+                tarih: null,
+                kaynaklar
+              };
+            });
+
+            const usedKeys = new Set(topicsData.topics.map(t => normalize(t.konu_adi)));
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              if (key && !usedKeys.has(key)) {
+                merged.push(k);
+              }
+            });
+
+            finalKonular = merged;
+          }
+        } catch (topicErr) {
+          console.error('Varsayılan konular çekilemedi:', topicErr);
+        }
       }
+
+      if (finalKonular.length > 0) {
+        setKonuIlerlemesi(finalKonular);
+        return;
+      }
+
+      const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
+        id: null,
+        konu: `Konu ${i + 1}`,
+        sira: i + 1,
+        durum: 'Konuya Gelinmedi',
+        tarih: null,
+        kaynaklar: []
+      }));
+      setKonuIlerlemesi(defaultKonular);
     } catch (err) {
       console.error('Konu ilerlemesi yüklenemedi:', err);
       const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
@@ -1500,20 +1608,18 @@ const OgrenciPanel = () => {
     }
   };
 
-  // Kaynak silme
-  const handleKaynakSil = (konuIndex, kaynakIndex) => {
-    const newKonular = [...konuIlerlemesi];
-    if (newKonular[konuIndex].kaynaklar) {
-      newKonular[konuIndex].kaynaklar.splice(kaynakIndex, 1);
-      setKonuIlerlemesi(newKonular);
-      saveKonuIlerlemesi(true);
-    }
-  };
-
   const calculateYuzde = (kaynaklar) => {
     if (!kaynaklar || kaynaklar.length === 0) return 0;
     const tamamlanan = kaynaklar.filter(k => k.tamamlandi).length;
     return Math.round((tamamlanan / kaynaklar.length) * 100);
+  };
+
+  const getYuzdeColor = (yuzde) => {
+    if (yuzde === 0) return '#ef4444';
+    if (yuzde === 100) return '#10b981';
+    const red = Math.round(239 - (yuzde / 100) * 229);
+    const green = Math.round(68 + (yuzde / 100) * 113);
+    return `rgb(${red}, ${green}, 68)`;
   };
 
   // Branş denemeleri yardımcıları
@@ -1526,15 +1632,8 @@ const OgrenciPanel = () => {
 
   // Öğrencinin alanına göre ders listesini belirle
   const bransDersList = useMemo(() => {
-    const selectedComp = examComponents.find(c => c.id === bransExamType);
-    if (selectedComp && selectedComp.dersler) {
-      return selectedComp.dersler;
-    }
-    if (examComponents.length > 0) {
-      return examComponents[0].dersler || [];
-    }
-    return [];
-  }, [bransExamType, examComponents]);
+    return getDersList(bransExamType, student?.alan);
+  }, [bransExamType, examComponents, student?.alan]);
 
   const handleBransFormChange = (field, value) => {
     setBransDenemeForm((prev) => {
@@ -1795,6 +1894,14 @@ const OgrenciPanel = () => {
       });
     }
     return found || null;
+  };
+
+  const ensureBransDersSelected = () => {
+    if (!bransDenemeForm.ders) {
+      alert('Lütfen ders seçiniz');
+      return false;
+    }
+    return true;
   };
 
   // Genel deneme helper fonksiyonları
@@ -3709,10 +3816,9 @@ const OgrenciPanel = () => {
               <div style={{maxWidth: '1400px', margin: '0 auto'}}>
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32}}>
                   <h2 style={{fontSize: '28px', fontWeight: 700, color: '#1f2937', letterSpacing: '-0.5px', margin: 0}}>
-                    Konu İlerlemesi
+                    Kaynak ve Konu İlerlemesi
                   </h2>
                   
-                  {/* Dinamik Sınav Bileşenleri Sekmeleri */}
                   {examComponents.length > 1 && (
                     <div style={{display: 'flex', gap: 8, background: 'white', padding: 4, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}}>
                       {examComponents.map((comp) => (
@@ -3765,21 +3871,13 @@ const OgrenciPanel = () => {
                       gap: 16
                     }}>
                       {student && (() => {
-                        const selectedComp = examComponents.find(c => c.id === ilerlemeExamType);
-                        let studentSubjects = [];
-                        
-                        if (selectedComp && selectedComp.dersler) {
-                          studentSubjects = selectedComp.dersler;
-                        } else if (examComponents.length > 0) {
-                          studentSubjects = examComponents[0].dersler || [];
-                        }
-                        
-                        return studentSubjects.map((ders) => {
-                          const iconSrc = getSubjectIcon(ders, allSubjects);
+                        const studentSubjects = getDersList(ilerlemeExamType, student?.alan);
+                        return studentSubjects.map((dersAdi) => {
+                          const iconSrc = getSubjectIconForExam(ilerlemeExamType, dersAdi);
                           return (
                             <div
-                              key={ders}
-                              onClick={() => setSelectedDersForIlerleme(ders)}
+                              key={dersAdi}
+                              onClick={() => setSelectedDersForIlerleme(dersAdi)}
                               style={{
                                 background: 'white',
                                 borderRadius: 12,
@@ -3806,7 +3904,7 @@ const OgrenciPanel = () => {
                               {iconSrc && (
                                 <img
                                   src={iconSrc}
-                                  alt={ders}
+                                  alt={dersAdi}
                                   style={{
                                     width: 40,
                                     height: 40,
@@ -3816,7 +3914,7 @@ const OgrenciPanel = () => {
                                 />
                               )}
                               <span style={{fontSize: '16px', fontWeight: 600, color: '#1f2937'}}>
-                                {ders}
+                                {dersAdi}
                               </span>
                             </div>
                           );
@@ -3851,9 +3949,9 @@ const OgrenciPanel = () => {
                           Geri
                         </button>
                         <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-                          {getSubjectIcon(selectedDersForIlerleme, allSubjects) && (
+                          {getSubjectIconForExam(ilerlemeExamType, selectedDersForIlerleme) && (
                             <img
-                              src={getSubjectIcon(selectedDersForIlerleme, allSubjects)}
+                              src={getSubjectIconForExam(ilerlemeExamType, selectedDersForIlerleme)}
                               alt={selectedDersForIlerleme}
                               style={{
                                 width: 32,
@@ -3869,7 +3967,6 @@ const OgrenciPanel = () => {
                         </div>
                       </div>
                       <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                        {/* Öğrenci kaynak ekleyemez ve sıralamayı değiştiremez */}
                         <button
                           onClick={() => saveKonuIlerlemesi(false)}
                           style={{
@@ -3902,35 +3999,81 @@ const OgrenciPanel = () => {
                         overflow: 'hidden',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                       }}>
-                        {/* Tablo Başlıkları */}
+                        {(() => {
+                          const totalKaynak = konuIlerlemesi.reduce((sum, k) => sum + (k.kaynaklar ? k.kaynaklar.length : 0), 0);
+                          const doneKaynak = konuIlerlemesi.reduce((sum, k) => sum + (k.kaynaklar ? k.kaynaklar.filter(x => x.tamamlandi).length : 0), 0);
+                          const genelYuzde = totalKaynak > 0 ? Math.round((doneKaynak / totalKaynak) * 100) : 0;
+                          const color = getYuzdeColor(genelYuzde);
+                          return (
+                            <div style={{
+                              padding: '16px 20px',
+                              borderBottom: '1px solid #e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 16,
+                              background: '#f9fafb'
+                            }}>
+                              <div style={{flex: 1}}>
+                                <div style={{fontSize: '14px', color: '#6b7280', fontWeight: 600}}>
+                                  Ders Genel Kaynak İlerleme
+                                </div>
+                                <div style={{display: 'flex', alignItems: 'center', gap: 12, marginTop: 8}}>
+                                  <div style={{
+                                    width: '100%',
+                                    height: 10,
+                                    background: '#e5e7eb',
+                                    borderRadius: 6,
+                                    overflow: 'hidden'
+                                  }}>
+                                    <div style={{
+                                      width: `${genelYuzde}%`,
+                                      height: '100%',
+                                      background: color,
+                                      transition: 'width 0.3s ease'
+                                    }} />
+                                  </div>
+                                  <span style={{fontWeight: 700, color}}>%{genelYuzde}</span>
+                                </div>
+                                <div style={{fontSize: '12px', color: '#9ca3af', marginTop: 4}}>
+                                  Tamamlanan: {doneKaynak} / {totalKaynak}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '1fr 150px 200px 1fr 100px',
+                          gridTemplateColumns: '40px 1fr 150px 200px 1fr 100px',
                           gap: 16,
                           padding: '16px 20px',
                           background: '#f9fafb',
                           borderBottom: '2px solid #e5e7eb',
                           fontWeight: 600,
                           fontSize: '14px',
-                          color: '#374151'
+                          color: '#374151',
+                          alignItems: 'center'
                         }}>
+                          <div></div>
                           <div>Konu</div>
                           <div>Tarih</div>
                           <div>Durum</div>
-                          <div>Kaynaklar</div>
+                          <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+                            <span>Kaynaklar</span>
+                            {/* Öğrenci kaynak ekleyemez */}
+                          </div>
                           <div>Yüzde</div>
                         </div>
 
-                        {/* Tablo Satırları */}
                         {konuIlerlemesi.map((konu, index) => {
                           const yuzde = calculateYuzde(konu.kaynaklar);
-                          const yuzdeColor = yuzde === 100 ? '#10b981' : yuzde >= 50 ? '#f59e0b' : '#ef4444';
+                          const yuzdeColor = getYuzdeColor(yuzde);
                           return (
                             <div
                               key={konu.id || index}
                               style={{
-                              display: 'grid',
-                                gridTemplateColumns: '1fr 150px 200px 1fr 100px',
+                                display: 'grid',
+                                gridTemplateColumns: '40px 1fr 150px 200px 1fr 100px',
                                 gap: 16,
                                 padding: '16px 20px',
                                 borderBottom: index < konuIlerlemesi.length - 1 ? '1px solid #e5e7eb' : 'none',
@@ -3938,6 +4081,9 @@ const OgrenciPanel = () => {
                                 background: 'white'
                               }}
                             >
+                              {/* Boş Sütun (Drag Handle Yeri) */}
+                              <div></div>
+
                               {/* Konu */}
                               <div style={{fontSize: '15px', fontWeight: 600, color: '#1f2937'}}>
                                   {konu.konu}
@@ -4174,7 +4320,10 @@ const OgrenciPanel = () => {
                               type="number"
                               min="0"
                               value={bransDenemeForm[field]}
-                              onChange={(e) => handleBransFormChange(field, e.target.value)}
+                              onChange={(e) => {
+                                if (!ensureBransDersSelected()) return;
+                                handleBransFormChange(field, e.target.value);
+                              }}
                               style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
                             />
                             </div>
@@ -4189,13 +4338,13 @@ const OgrenciPanel = () => {
 
                     <button
                       onClick={() => {
+                        if (!ensureBransDersSelected()) return;
                         const next = !bransKonuDetayAcik;
                         setBransKonuDetayAcik(next);
                         if (next && bransKonular.length === 0 && bransDenemeForm.ders) {
                           fetchBransKonular(bransDenemeForm.ders);
                         }
                       }}
-                      disabled={!bransDenemeForm.ders}
                       style={{
                         marginBottom: 12,
                         padding: '10px 12px',
@@ -4203,7 +4352,7 @@ const OgrenciPanel = () => {
                         border: '1px solid #e5e7eb',
                         background: bransKonuDetayAcik ? '#eef2ff' : 'white',
                         color: '#111827',
-                        cursor: bransDenemeForm.ders ? 'pointer' : 'not-allowed'
+                        cursor: 'pointer'
                       }}
                     >
                       Yanlış / Boş Konuları Gir
@@ -5070,35 +5219,54 @@ const OgrenciPanel = () => {
                           filteredDenemeler = filteredDenemeler.slice(0, 1);
                         }
 
-                        const trendData = filteredDenemeler.map((deneme) => {
+                        const rawTrendData = genelDenemeList.map((deneme, index) => {
                           const toplamNet = Object.values(deneme.dersSonuclari || {}).reduce(
                             (sum, d) => sum + (Number(d.net) || 0),
                             0
                           );
                           return {
-                            id: deneme.id,
-                            denemeAdi: deneme.denemeAdi,
+                            index,
+                            label: deneme.denemeAdi || `Deneme ${index + 1}`,
                             tarih: deneme.denemeTarihi,
-                            toplamNet
+                            net: toplamNet
                           };
                         });
 
-                        const maxToplamNet =
+                        const trendData = [...rawTrendData].sort((a, b) => {
+                          const da = a.tarih ? new Date(a.tarih).getTime() : 0;
+                          const db = b.tarih ? new Date(b.tarih).getTime() : 0;
+                          if (!Number.isFinite(da) || !Number.isFinite(db)) return a.index - b.index;
+                          return da - db;
+                        });
+
+                        const maxTrendNet = trendData.length
+                          ? Math.max(...trendData.map((d) => d.net), 1)
+                          : 1;
+                        const trendChartData = trendData.map((d) => {
+                          const label =
+                            d.label && d.label.length > 12
+                              ? `${d.label.slice(0, 10)}…`
+                              : d.label;
+                          return {
+                            name: label || '',
+                            net: d.net,
+                            tarih: d.tarih
+                          };
+                        });
+                        const ortNet =
                           trendData.length > 0
-                            ? Math.max(...trendData.map((d) => d.toplamNet), 0)
+                            ? trendData.reduce((sum, d) => sum + d.net, 0) / trendData.length
                             : 0;
-                        const trendMaxValue =
-                          maxToplamNet > 0 ? Math.ceil(maxToplamNet * 1.1 / 5) * 5 : 5;
-                        const trendChartHeight = 220;
 
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                             <div
                               style={{
-                                background: '#f9fafb',
+                                background: '#ffffff',
                                 borderRadius: 16,
                                 padding: 24,
-                                border: '1px solid #e5e7eb'
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)'
                               }}
                             >
                               <div
@@ -5109,179 +5277,167 @@ const OgrenciPanel = () => {
                                   marginBottom: 16
                                 }}
                               >
-                                <h4
-                                  style={{
-                                    fontSize: 18,
-                                    fontWeight: 700,
-                                    color: '#111827',
-                                    margin: 0
-                                  }}
-                                >
-                                  Tüm Denemelerde Toplam Net Trend Grafiği
-                                </h4>
                                 <div
                                   style={{
-                                    fontSize: 13,
-                                    color: '#6b7280'
-                                  }}
-                                >
-                                  {filteredDenemeler.length} deneme
-                                </div>
-                              </div>
-
-                              <div style={{ position: 'relative', height: trendChartHeight }}>
-                                <div
-                                  style={{
-                                    position: 'absolute',
-                                    left: 0,
-                                    top: 0,
-                                    bottom: 0,
-                                    width: 40,
                                     display: 'flex',
-                                    flexDirection: 'column',
-                                    justifyContent: 'space-between',
-                                    paddingRight: 8
+                                    alignItems: 'center',
+                                    gap: 10
                                   }}
                                 >
-                                  {[trendMaxValue, trendMaxValue * 0.75, trendMaxValue * 0.5, trendMaxValue * 0.25, 0].map(
-                                    (val, idx) => (
-                                      <div
-                                        key={idx}
-                                        style={{
-                                          fontSize: 11,
-                                          color: '#6b7280',
-                                          textAlign: 'right'
-                                        }}
-                                      >
-                                        {Math.round(val)}
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-
-                                <div
-                                  style={{
-                                    marginLeft: 48,
-                                    position: 'relative',
-                                    height: trendChartHeight,
-                                    borderLeft: '1px solid #e5e7eb',
-                                    borderBottom: '1px solid #e5e7eb'
-                                  }}
-                                >
-                                  {[1, 2, 3, 4].map((val) => (
-                                    <div
-                                      key={val}
-                                      style={{
-                                        position: 'absolute',
-                                        left: 0,
-                                        right: 0,
-                                        bottom: `${(val / 4) * 100}%`,
-                                        borderTop: '1px dashed #e5e7eb'
-                                      }}
-                                    />
-                                  ))}
-
+                                  <div
+                                    style={{
+                                      width: 26,
+                                      height: 26,
+                                      borderRadius: 999,
+                                      background: '#f3e8ff',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: '#7c3aed',
+                                      fontSize: 13
+                                    }}
+                                  >
+                                    <span>↗</span>
+                                  </div>
                                   <div
                                     style={{
                                       display: 'flex',
-                                      alignItems: 'flex-end',
-                                      height: '100%',
-                                      padding: '0 24px',
-                                      gap: 12,
-                                      justifyContent: 'center',
-                                      position: 'absolute',
-                                      bottom: 0,
-                                      left: 0,
-                                      right: 0
+                                      flexDirection: 'column',
+                                      gap: 2
                                     }}
                                   >
-                                    {trendData.map((item, index) => {
-                                      const heightPx =
-                                        trendMaxValue > 0
-                                          ? (trendChartHeight * item.toplamNet) / trendMaxValue
-                                          : 0;
-                                      return (
-                                        <div
-                                          key={item.id || index}
-                                          style={{
-                                            flex: 1,
-                                            minWidth: 40,
-                                            maxWidth: 70,
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            justifyContent: 'flex-end',
-                                            height: '100%'
-                                          }}
-                                        >
-                                          {item.toplamNet > 0 && (
-                                            <div
-                                              style={{
-                                                marginBottom: 4,
-                                                fontSize: 12,
-                                                fontWeight: 700,
-                                                color: '#111827',
-                                                minHeight: 18,
-                                                display: 'flex',
-                                                alignItems: 'center'
-                                              }}
-                                            >
-                                              {item.toplamNet.toFixed(1)}
-                                            </div>
-                                          )}
-                                          <div
-                                            style={{
-                                              width: '100%',
-                                              background: genelNetColor(item.toplamNet, trendMaxValue),
-                                              borderRadius: '4px 4px 0 0',
-                                              height: `${heightPx}px`,
-                                              minHeight: item.toplamNet > 0 ? 5 : 0,
-                                              position: 'relative',
-                                              alignSelf: 'flex-end'
-                                            }}
-                                            title={`${item.denemeAdi}: ${item.toplamNet.toFixed(2)} net`}
-                                          />
-                                        </div>
-                                      );
-                                    })}
+                                    <div
+                                      style={{
+                                        fontSize: 16,
+                                        fontWeight: 600,
+                                        color: '#111827'
+                                      }}
+                                    >
+                                      Büyüme Trendleri
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 12,
+                                        fontWeight: 500,
+                                        color: '#6b7280'
+                                      }}
+                                    >
+                                      Toplam netlerdeki değişim
+                                    </div>
                                   </div>
                                 </div>
+                                {trendData.length > 0 && (
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        color:
+                                          trendData[trendData.length - 1].net >= trendData[0].net
+                                            ? '#16a34a'
+                                            : '#dc2626',
+                                        background: 'rgba(255,255,255,0.9)',
+                                        padding: '4px 12px',
+                                        borderRadius: 999,
+                                        border: '1px solid rgba(209, 213, 219, 0.7)'
+                                      }}
+                                    >
+                                      Son Net {trendData[trendData.length - 1].net.toFixed(1)}
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        color: '#4b5563',
+                                        background: 'rgba(255,255,255,0.9)',
+                                        padding: '4px 12px',
+                                        borderRadius: 999,
+                                        border: '1px solid rgba(209, 213, 219, 0.7)'
+                                      }}
+                                    >
+                                      Ortalama {ortNet.toFixed(1)}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
 
+                              <div
+                                style={{
+                                  background: '#fbfbfd',
+                                  borderRadius: 14,
+                                  padding: 20,
+                                  border: '1px solid #edf0f5'
+                                }}
+                              >
                                 <div
                                   style={{
-                                    marginLeft: 48,
-                                    marginTop: 12,
-                                    display: 'flex',
-                                    padding: '0 24px',
-                                    gap: 12,
-                                    justifyContent: 'center'
+                                    height: 220,
+                                    width: '100%'
                                   }}
                                 >
-                                  {trendData.map((item, index) => {
-                                    const isCompact = trendData.length > 6;
-                                    const label =
-                                      item.denemeAdi && item.denemeAdi.length > 16
-                                        ? item.denemeAdi.substring(0, 13) + '...'
-                                        : item.denemeAdi || `Deneme ${index + 1}`;
-                                    return (
-                                      <div
-                                        key={item.id || index}
-                                        style={{
-                                          flex: 1,
-                                          minWidth: 40,
-                                          maxWidth: isCompact ? 28 : 80,
-                                          fontSize: 11,
-                                          color: '#6b7280',
-                                          textAlign: 'center',
-                                          writingMode: isCompact ? 'vertical-rl' : 'horizontal-tb',
-                                          transform: isCompact ? 'rotate(180deg)' : 'none',
-                                          wordBreak: 'break-word'
-                                        }}
-                                      >
-                                        {label}
-                                      </div>
-                                    );
-                                  })}
+                                  {trendChartData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <LineChart data={trendChartData}>
+                                        <CartesianGrid
+                                          strokeDasharray="3 3"
+                                          vertical={false}
+                                          stroke="#e5e7eb"
+                                        />
+                                        <XAxis
+                                          dataKey="name"
+                                          axisLine={false}
+                                          tickLine={false}
+                                          tick={{ fill: '#9ca3af', fontSize: 12 }}
+                                          dy={10}
+                                        />
+                                        <YAxis
+                                          axisLine={false}
+                                          tickLine={false}
+                                          tick={{ fill: '#9ca3af', fontSize: 12 }}
+                                        />
+                                        <Tooltip
+                                          contentStyle={{
+                                            background: '#fff',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: 8,
+                                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                          }}
+                                          itemStyle={{ color: '#6a1b9a' }}
+                                          labelFormatter={(label, payload) => {
+                                            if (!payload || !payload.length) return label;
+                                            const item = payload[0].payload;
+                                            return item.tarih || label;
+                                          }}
+                                        />
+                                        <Line
+                                          type="monotone"
+                                          dataKey="net"
+                                          stroke="#6a1b9a"
+                                          strokeWidth={3}
+                                          dot={{
+                                            r: 4,
+                                            fill: '#6a1b9a',
+                                            strokeWidth: 2,
+                                            stroke: '#fff'
+                                          }}
+                                          activeDot={{ r: 6 }}
+                                        />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                  ) : (
+                                    <div
+                                      style={{
+                                        height: '100%',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: '#9ca3af',
+                                        fontSize: 13
+                                      }}
+                                    >
+                                      Henüz deneme verisi yok
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -5289,7 +5445,7 @@ const OgrenciPanel = () => {
                             <div
                               style={{
                                 display: 'grid',
-                                gridTemplateColumns: 'repeat(2, 1fr)',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
                                 gap: 20
                               }}
                             >
@@ -5298,130 +5454,147 @@ const OgrenciPanel = () => {
                                   (sum, d) => sum + (Number(d.net) || 0),
                                   0
                                 );
-                                const dersEntries = Object.entries(deneme.dersSonuclari || {});
-                                const rawMaxNet =
-                                  dersEntries.length > 0
-                                    ? Math.max(
-                                        ...dersEntries.map(([, d]) => Number(d.net) || 0),
-                                        0
-                                      )
-                                    : 0;
-                                const maxNet =
-                                  rawMaxNet > 0
-                                    ? Math.ceil(rawMaxNet * 1.1 * 10) / 10
-                                    : 1;
-
+                                const dersSonuclariEntries = Object.entries(deneme.dersSonuclari || {});
+                                const maxNetForCard = dersSonuclariEntries.length
+                                  ? Math.max(
+                                      ...dersSonuclariEntries.map(([, d]) => Number(d.net) || 0),
+                                      1
+                                    )
+                                  : 1;
                                 return (
                                   <div
                                     key={deneme.id}
                                     style={{
-                                      border: '1px solid #e5e7eb',
-                                      borderRadius: 12,
+                                      borderRadius: 16,
                                       padding: 20,
-                                      background: '#f9fafb',
+                                      background: 'white',
+                                      border: '1px solid #e5e7eb',
+                                      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.06)',
                                       display: 'flex',
                                       flexDirection: 'column',
-                                      gap: 10
+                                      gap: 12
                                     }}
                                   >
-                                    <div style={{ marginBottom: 16 }}>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'baseline',
+                                        marginBottom: 4
+                                      }}
+                                    >
                                       <div
                                         style={{
                                           fontSize: 18,
                                           fontWeight: 700,
-                                          color: '#111827',
-                                          marginBottom: 4
+                                          color: '#111827'
                                         }}
                                       >
                                         {deneme.denemeAdi}
                                       </div>
-                                      <div style={{ fontSize: 14, color: '#6b7280' }}>
-                                        {deneme.denemeTarihi}
-                                      </div>
                                       <div
                                         style={{
-                                          marginTop: 8,
-                                          fontSize: 16,
-                                          fontWeight: 700,
-                                          color: '#6a1b9a'
+                                          fontSize: 13,
+                                          fontWeight: 600,
+                                          padding: '4px 10px',
+                                          borderRadius: 999,
+                                          background: 'rgba(76, 29, 149, 0.06)',
+                                          color: '#4c1d95'
                                         }}
                                       >
-                                        Toplam Net: {toplamNet.toFixed(2)}
+                                        Toplam Net: {toplamNet.toFixed(1)}
                                       </div>
                                     </div>
                                     <div
                                       style={{
-                                        height: 200,
-                                        display: 'flex',
-                                        alignItems: 'flex-end',
-                                        gap: 8,
-                                        marginTop: 10,
-                                        paddingBottom: 10
+                                        fontSize: 13,
+                                        color: '#6b7280',
+                                        marginBottom: 4
                                       }}
                                     >
-                                      {dersEntries.map(([ders, data]) => {
-                                        const net = Number(data.net) || 0;
-                                        const height =
-                                          maxNet > 0 ? (net / maxNet) * 160 : 0;
-                                        const barColor = genelNetColor(net, maxNet);
-                                        const label =
-                                          ders && ders.includes(' ')
-                                            ? ders.split(' ').slice(-1)[0]
-                                            : ders;
-
-                                        return (
-                                          <div
-                                            key={ders}
-                                            style={{
-                                              flex: 1,
-                                              display: 'flex',
-                                              flexDirection: 'column',
-                                              alignItems: 'center',
-                                              justifyContent: 'flex-end',
-                                              gap: 6
-                                            }}
-                                          >
-                                            {net > 0 && (
+                                      {deneme.denemeTarihi}
+                                    </div>
+                                    <div
+                                      style={{
+                                        marginTop: 4,
+                                        background: '#f9fafb',
+                                        borderRadius: 12,
+                                        padding: '14px 10px',
+                                        border: '1px solid #e5e7eb'
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          height: 180,
+                                          display: 'flex',
+                                          alignItems: 'flex-end',
+                                          gap: 6,
+                                          paddingBottom: 10
+                                        }}
+                                      >
+                                        {dersSonuclariEntries.map(([ders, data]) => {
+                                          const net = Number(data.net) || 0;
+                                          const height =
+                                            maxNetForCard > 0 ? (net / maxNetForCard) * 150 : 0;
+                                          const barColor = genelNetColor(net, maxNetForCard);
+                                          return (
+                                            <div
+                                              key={ders}
+                                              style={{
+                                                flex: 1,
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                gap: 6
+                                              }}
+                                            >
+                                              <div
+                                                style={{
+                                                  width: '100%',
+                                                  height: `${Math.max(height, 4)}px`,
+                                                  background: barColor,
+                                                  borderRadius: '8px 8px 0 0',
+                                                  position: 'relative',
+                                                  display: 'flex',
+                                                  alignItems: 'flex-end',
+                                                  justifyContent: 'center',
+                                                  paddingBottom: 4,
+                                                  boxShadow: '0 6px 12px rgba(15, 23, 42, 0.25)'
+                                                }}
+                                                title={`${ders}: ${net.toFixed(2)}`}
+                                              >
+                                                <div
+                                                  style={{
+                                                    fontSize: 12,
+                                                    fontWeight: 700,
+                                                    color: '#f9fafb',
+                                                    background: 'rgba(15,23,42,0.35)',
+                                                    borderRadius: 999,
+                                                    padding: '2px 8px',
+                                                    letterSpacing: 0.04
+                                                  }}
+                                                >
+                                                  {net.toFixed(1)}
+                                                </div>
+                                              </div>
                                               <div
                                                 style={{
                                                   fontSize: 12,
-                                                  fontWeight: 700,
+                                                  fontWeight: 600,
                                                   color: '#111827',
-                                                  minHeight: 16,
+                                                  textAlign: 'center',
+                                                  height: 32,
                                                   display: 'flex',
                                                   alignItems: 'center',
                                                   justifyContent: 'center'
                                                 }}
                                               >
-                                                {net.toFixed(1)}
+                                                {ders.split(' ').pop()}
                                               </div>
-                                            )}
-                                            <div
-                                              style={{
-                                                width: '100%',
-                                                height: `${Math.max(height, 4)}px`,
-                                                background: barColor,
-                                                borderRadius: '4px 4px 0 0',
-                                                position: 'relative',
-                                                alignSelf: 'flex-end'
-                                              }}
-                                              title={`${ders}: ${net.toFixed(2)} net`}
-                                            />
-                                            <div
-                                              style={{
-                                                fontSize: 12,
-                                                fontWeight: 600,
-                                                color: '#111827',
-                                                textAlign: 'center',
-                                                maxWidth: 60,
-                                                wordBreak: 'break-word'
-                                              }}
-                                            >
-                                              {label}
                                             </div>
-                                          </div>
-                                        );
-                                      })}
+                                          );
+                                        })}
+                                      </div>
                                     </div>
                                   </div>
                                 );
