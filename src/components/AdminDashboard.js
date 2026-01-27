@@ -604,11 +604,37 @@ const DersDetayTab = () => {
     setSelectedCourse(course);
     setSelectedTopic(null);
     setIsResourceEditorOpen(false);
-    const topicData = await fetchApi(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(course.id)}`);
+    const topicData = await fetchApi(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(course.id)}&includeSubtopics=true&t=${Date.now()}`);
     if (topicData.success) {
-      const list = topicData.topics || [];
-      setTopics(list);
-      if (list.length > 0) setSelectedTopic(list[0]);
+      const allTopics = topicData.topics || [];
+      
+      // Hiyerarşiyi düzleştirilmiş liste olarak hazırla
+      const processedTopics = [];
+      // Ana konuları bul
+      const mainTopics = allTopics.filter(t => !t.parent_id || t.parent_id === '0' || t.parent_id === null);
+      
+      // Alt konuları grupla
+      const subTopicsMap = {};
+      allTopics.forEach(t => {
+        const pId = String(t.parent_id || '').trim();
+        if (pId && pId !== '0') {
+            if (!subTopicsMap[pId]) subTopicsMap[pId] = [];
+            subTopicsMap[pId].push(t);
+        }
+      });
+      
+      // Sıralı listeyi oluştur
+      mainTopics.forEach(main => {
+        processedTopics.push({ ...main, type: 'main' });
+        if (subTopicsMap[main.id]) {
+             subTopicsMap[main.id].forEach(sub => {
+                processedTopics.push({ ...sub, type: 'sub' });
+             });
+        }
+      });
+
+      setTopics(processedTopics);
+      if (processedTopics.length > 0) setSelectedTopic(processedTopics[0]);
     } else {
       setTopics([]);
       setSelectedTopic(null);
@@ -783,7 +809,7 @@ const DersDetayTab = () => {
               {(provided) => (
                 <div {...provided.droppableProps} ref={provided.innerRef}>
                   {topics.map((topic, index) => (
-                    <Draggable key={topic.id} draggableId={topic.id} index={index}>
+                    <Draggable key={topic.id} draggableId={topic.id} index={index} isDragDisabled={topic.type === 'sub'}>
                       {(provided) => (
                         <div
                           ref={provided.innerRef}
@@ -797,6 +823,9 @@ const DersDetayTab = () => {
                             backgroundColor: selectedTopic?.id === topic.id ? '#6a1b9a0f' : 'white',
                             border: '1px solid #e5e7eb',
                             borderRadius: 8,
+                            marginLeft: topic.type === 'sub' ? '24px' : '0',
+                            borderLeft: topic.type === 'sub' ? '4px solid #6a1b9a' : '1px solid #e5e7eb',
+                            fontSize: topic.type === 'sub' ? '14px' : '15px',
                             ...provided.draggableProps.style,
                           }}
                         >
@@ -888,6 +917,8 @@ const ExamManagementTab = () => {
     const [subjects, setSubjects] = useState([]);
     const [selectedSubject, setSelectedSubject] = useState(null);
     const [topics, setTopics] = useState([]);
+    const [selectedTopic, setSelectedTopic] = useState(null);
+    const [subTopics, setSubTopics] = useState([]);
 
     const [modalConfig, setModalConfig] = useState({ isOpen: false, type: null, data: null });
     const [formData, setFormData] = useState({});
@@ -920,9 +951,15 @@ const ExamManagementTab = () => {
     };
 
     const fetchTopics = async (dersId) => {
-        const data = await fetchApi(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${dersId}`);
+        const data = await fetchApi(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${dersId}&t=${Date.now()}`);
         if (data.success) setTopics(data.topics || []);
         else setTopics([]);
+    };
+
+    const fetchSubTopics = async (topicId) => {
+        const data = await fetchApi(`${API_BASE}/php-backend/api/get_subject_topics.php?parentId=${topicId}&t=${Date.now()}`);
+        if (data.success) setSubTopics(data.topics || []);
+        else setSubTopics([]);
     };
 
     const handleSelectExam = async (exam) => {
@@ -931,6 +968,8 @@ const ExamManagementTab = () => {
         setSelectedSubComponent(null);
         setSelectedSubject(null);
         setTopics([]);
+        setSelectedTopic(null);
+        setSubTopics([]);
         // Bileşenleri yükle ve yoksa sınavın genel derslerini getir
         const compData = await fetchApi(`${API_BASE}/php-backend/api/get_components.php?sinavId=${exam.id}`);
         if (compData.success && Array.isArray(compData.components)) {
@@ -955,6 +994,8 @@ const ExamManagementTab = () => {
         setSelectedSubComponent(null);
         setSelectedSubject(null);
         setTopics([]);
+        setSelectedTopic(null);
+        setSubTopics([]);
         
         // Eğer alt bileşenleri varsa dersleri getirme, alt bileşen seçmesini bekle
         // Ancak bu kontrolü render sırasında değil burada yapmak için güncel components listesine ihtiyacımız var
@@ -971,12 +1012,21 @@ const ExamManagementTab = () => {
         setSelectedSubComponent(subComp);
         setSelectedSubject(null);
         setTopics([]);
+        setSelectedTopic(null);
+        setSubTopics([]);
         fetchSubjects(selectedExam.id, subComp.id);
     };
 
     const handleSelectSubject = (subj) => {
         setSelectedSubject(subj);
+        setSelectedTopic(null);
+        setSubTopics([]);
         fetchTopics(subj.id);
+    };
+
+    const handleSelectTopic = (topic) => {
+        setSelectedTopic(topic);
+        fetchSubTopics(topic.id);
     };
 
     const openModal = (type, data = null) => {
@@ -1011,9 +1061,12 @@ const ExamManagementTab = () => {
             const targetCompId = selectedSubComponent ? selectedSubComponent.id : (selectedComponent ? selectedComponent.id : null);
             body = { ...formData, sinavId: selectedExam.id, componentId: targetCompId };
             if (isEdit) body.id = data.id;
-        } else if (type === 'topic') {
+        } else if (type === 'topic' || type === 'subTopic') {
             url = isEdit ? 'update_subject_topic.php' : 'create_subject_topic.php';
             body = { ...formData, dersId: selectedSubject.id };
+            if (type === 'subTopic') {
+                body.parentId = selectedTopic.id;
+            }
             if (isEdit) body.id = data.id;
         }
 
@@ -1028,6 +1081,7 @@ const ExamManagementTab = () => {
             else if (type === 'component' || type === 'subComponent') fetchComponents(selectedExam.id);
             else if (type === 'subject') fetchSubjects(selectedExam.id, selectedSubComponent?.id || selectedComponent?.id);
             else if (type === 'topic') fetchTopics(selectedSubject.id);
+            else if (type === 'subTopic') fetchSubTopics(selectedTopic.id);
         } else {
             alert(res.message || 'Bir hata oluştu');
         }
@@ -1039,7 +1093,7 @@ const ExamManagementTab = () => {
         if (type === 'exam') url = 'delete_exam.php';
         else if (type === 'component' || type === 'subComponent') url = 'delete_component.php';
         else if (type === 'subject') url = 'delete_exam_subject.php';
-        else if (type === 'topic') url = 'delete_subject_topic.php';
+        else if (type === 'topic' || type === 'subTopic') url = 'delete_subject_topic.php';
         
         const res = await fetchApi(`${API_BASE}/php-backend/api/${url}`, {
             method: 'POST',
@@ -1061,6 +1115,7 @@ const ExamManagementTab = () => {
                 if (selectedSubject?.id === item.id) setSelectedSubject(null);
             }
             else if (type === 'topic') fetchTopics(selectedSubject.id);
+            else if (type === 'subTopic') fetchSubTopics(selectedTopic.id);
         } else {
             alert(res.message || 'Silinemedi');
         }
@@ -1127,11 +1182,24 @@ const ExamManagementTab = () => {
                 <ManagementColumn 
                     title={`${selectedSubject.ders_adi} Konuları`} 
                     items={topics} 
-                    selectedItem={null} 
-                    onSelect={null}
+                    selectedItem={selectedTopic} 
+                    onSelect={handleSelectTopic}
                     onAdd={() => openModal('topic')}
                     onEdit={(item) => openModal('topic', item)}
                     onDelete={(item) => handleDelete('topic', item)}
+                    renderItem={(item) => item.konu_adi}
+                />
+            )}
+
+            {selectedTopic && (
+                <ManagementColumn 
+                    title={`${selectedTopic.konu_adi} Alt Konuları`} 
+                    items={subTopics} 
+                    selectedItem={null} 
+                    onSelect={null}
+                    onAdd={() => openModal('subTopic')}
+                    onEdit={(item) => openModal('subTopic', item)}
+                    onDelete={(item) => handleDelete('subTopic', item)}
                     renderItem={(item) => item.konu_adi}
                 />
             )}
@@ -1143,7 +1211,8 @@ const ExamManagementTab = () => {
                     modalConfig.type === 'exam' ? 'Sınav Ekle/Düzenle' : 
                     modalConfig.type === 'component' ? 'Alan/Grup Ekle/Düzenle' : 
                     modalConfig.type === 'subComponent' ? 'Oturum/Alt Bileşen Ekle/Düzenle' : 
-                    modalConfig.type === 'subject' ? 'Ders Ekle/Düzenle' : 'Konu Ekle/Düzenle'
+                    modalConfig.type === 'subject' ? 'Ders Ekle/Düzenle' : 
+                    modalConfig.type === 'topic' ? 'Konu Ekle/Düzenle' : 'Alt Konu Ekle/Düzenle'
                 }
                 onSave={handleSave}
             >
@@ -1177,9 +1246,9 @@ const ExamManagementTab = () => {
                             <input type="number" placeholder="Soru Sayısı" value={formData.soruSayisi || formData.soru_sayisi || ''} onChange={e => setFormData({...formData, soruSayisi: e.target.value})} style={{ padding: 8, borderRadius: 4, border: '1px solid #ddd' }} />
                         </>
                     )}
-                    {modalConfig.type === 'topic' && (
+                    {(modalConfig.type === 'topic' || modalConfig.type === 'subTopic') && (
                         <>
-                            <input placeholder="Konu Adı" value={formData.konuAdi || formData.konu_adi || ''} onChange={e => setFormData({...formData, konuAdi: e.target.value})} style={{ padding: 8, borderRadius: 4, border: '1px solid #ddd' }} />
+                            <input placeholder={modalConfig.type === 'subTopic' ? "Alt Konu Adı" : "Konu Adı"} value={formData.konuAdi || formData.konu_adi || ''} onChange={e => setFormData({...formData, konuAdi: e.target.value})} style={{ padding: 8, borderRadius: 4, border: '1px solid #ddd' }} />
                         </>
                     )}
                 </div>

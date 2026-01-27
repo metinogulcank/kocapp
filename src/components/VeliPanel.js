@@ -27,8 +27,6 @@ import Bildirimler from './Bildirimler';
 import OgrenciProgramTab from './OgrenciProgramTab';
 import Kaynaklar from './Kaynaklar';
 import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
-
-// Ders görselleri
 import cografyaImg from '../assets/cografya.png';
 import edebiyatImg from '../assets/edebiyat.png';
 import dinImg from '../assets/din.png';
@@ -63,7 +61,6 @@ const safeFetchJson = async (url, options = {}) => {
   }
 };
 
-// Alan kodunu (yks_say vb.) okunur etikete çevir
 const formatAreaLabel = (area, studentInfo = null) => {
   if (studentInfo && studentInfo.alanName) return studentInfo.alanName;
   if (studentInfo && studentInfo.alan && studentInfo.alan.includes(' - ')) return studentInfo.alan;
@@ -73,7 +70,6 @@ const formatAreaLabel = (area, studentInfo = null) => {
   return found ? found.label : area;
 };
 
-// Sınav tarihleri (yıllık güncellenebilir)
 const EXAM_DATES = {
   lgs: '2025-06-01',
   yks: '2025-06-15',
@@ -82,7 +78,6 @@ const EXAM_DATES = {
   kpss_egitim: '2025-07-20'
 };
 
-// Motivasyon mesajları
 const MOTIVATION_MESSAGES = [
   "Bugün harika bir gün! Başarılar seninle! 🎯",
   "Her adım seni hedefine yaklaştırıyor! 💪",
@@ -128,7 +123,6 @@ const VeliPanel = () => {
   const [student, setStudent] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  // Widget Data States
   const [motivationMessage, setMotivationMessage] = useState('');
   const [examCountdown, setExamCountdown] = useState({ days: 0, examName: '' });
   const [etutStats, setEtutStats] = useState({ yapilan: 0, eksikYapildi: 0, yapilmayan: 0, toplam: 0 });
@@ -136,9 +130,8 @@ const VeliPanel = () => {
   const [etutStatsLoading, setEtutStatsLoading] = useState(true);
   const [denemeLoading, setDenemeLoading] = useState(true);
 
-  // Placeholders for other features' states (to be implemented)
-  const [bransView, setBransView] = useState('charts'); // Default to charts for Veli
-  const [genelDenemeView, setGenelDenemeView] = useState('grafikler'); // Default to charts
+  const [bransView, setBransView] = useState('charts'); 
+  const [genelDenemeView, setGenelDenemeView] = useState('grafikler'); 
   const [questionStats, setQuestionStats] = useState({ todayRequired: 0, weekRequired: 0, weekPending: 0, totalSolved: 0 });
   const [questionStatsLoading, setQuestionStatsLoading] = useState(false);
   const [activeQuestionTab, setActiveQuestionTab] = useState('konu-dagilimi');
@@ -146,7 +139,6 @@ const VeliPanel = () => {
   const [examComponents, setExamComponents] = useState([]);
   const [examComponentsLoading, setExamComponentsLoading] = useState(false);
 
-  // Dinamik ders listesi alma yardımcı fonksiyonu
   const getDersList = (examCompId, fallbackArea) => {
     const selectedComp = examComponents.find(c => c.id === examCompId);
     if (selectedComp && selectedComp.dersler && selectedComp.dersler.length > 0) {
@@ -1036,8 +1028,6 @@ const VeliPanel = () => {
     navigate('/');
   };
 
-  // ---------------- RENDER METHODS ----------------
-
   const renderAnaSayfa = () => (
     <div style={{ padding: '32px', background: '#fafafa', minHeight: 'calc(100vh - 100px)' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
@@ -1201,8 +1191,169 @@ const VeliPanel = () => {
       const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
       );
-      if (data.success && data.konular && data.konular.length > 0) {
-        setKonuIlerlemesi(data.konular);
+      const existingKonular = data.success && Array.isArray(data.konular) ? data.konular : [];
+      let finalKonular = existingKonular;
+
+      const findSubjectMetaByName = (name) => {
+        if (!name || !examComponents || examComponents.length === 0) return null;
+        const normalizedSearch = name.trim().toLowerCase();
+        for (const comp of examComponents) {
+          const dersler = comp?.dersler || [];
+          for (const d of dersler) {
+            const dersAdi = typeof d === 'string' ? d : (d?.ders_adi || d?.ad || d?.name || '');
+            const dersId = typeof d === 'object' ? (d?.id || d?._id || d?.ders_id) : null;
+            const normalizedDers = (dersAdi || '').trim().toLowerCase();
+            const dersWithoutPrefix = normalizedDers.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+            const searchWithoutPrefix = normalizedSearch.replace(/^(tyt|ayt|lgs|kpss)\s+/i, '').trim();
+            if (normalizedDers === normalizedSearch || dersWithoutPrefix === searchWithoutPrefix) {
+              if (typeof d === 'object') return d;
+              return { ders_adi: dersAdi, id: dersId };
+            }
+          }
+        }
+        return null;
+      };
+
+      const subjectMeta = findSubjectMetaByName(dersForPayload);
+
+      if (subjectMeta && subjectMeta.id) {
+        try {
+          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subjectMeta.id)}&includeSubtopics=true`);
+          if (topicsData.success && Array.isArray(topicsData.topics) && topicsData.topics.length > 0) {
+            let dersResources = [];
+            try {
+              const resourcesData = await safeFetchJson(`${API_BASE}/php-backend/api/get_resources.php?ders_id=${encodeURIComponent(subjectMeta.id)}`);
+              if (resourcesData.success && Array.isArray(resourcesData.resources)) {
+                dersResources = resourcesData.resources.map(r => ({
+                  kaynak_adi: r.kaynak_adi,
+                  tamamlandi: false
+                }));
+              }
+            } catch {}
+
+            const normalize = (v) => (v || '').replace(/^[\d\.\-\s]+/, '').trim().toLocaleLowerCase('tr-TR');
+            const existingMap = new Map();
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              if (key && !existingMap.has(key)) {
+                existingMap.set(key, k);
+              }
+            });
+
+            const allTopics = topicsData.topics;
+            let parents = allTopics.filter(t => !t.parent_id || t.parent_id === '0');
+            let children = allTopics.filter(t => t.parent_id && t.parent_id !== '0');
+            const childrenMap = new Map();
+            
+            // DB'den gelen hiyerarşiyi map'e ekle
+            children.forEach(c => {
+                const pId = String(c.parent_id || '').trim();
+                if (pId && pId !== '0') {
+                  if (!childrenMap.has(pId)) childrenMap.set(pId, []);
+                  childrenMap.get(pId).push(c);
+                }
+            });
+
+            // İsimlendirmeden hiyerarşi çıkarımı (Tüm dersler için genel mantık)
+            const inferredParents = [];
+            let lastParent = null;
+            
+            // Sıralı olarak parents listesini işle
+            parents.forEach(p => {
+                const name = (p.konu_adi || '').trim();
+                // Alt konu işareti var mı? (- veya –)
+                if ((name.startsWith('-') || name.startsWith('–')) && lastParent) {
+                    // Bu bir alt konudur, lastParent'ın altına ekle
+                    const lpId = String(lastParent.id || '').trim();
+                    if (lpId) {
+                        if (!childrenMap.has(lpId)) childrenMap.set(lpId, []);
+                        childrenMap.get(lpId).push(p);
+                    }
+                    // Children listesine de ekle
+                    children.push(p);
+                } else {
+                    // Bu bir ana konudur
+                    inferredParents.push(p);
+                    lastParent = p;
+                }
+            });
+            
+            // Parents listesini güncelle
+            parents = inferredParents;
+
+            const childKeys = new Set();
+            children.forEach(c => childKeys.add(normalize(c.konu_adi)));
+            
+            const mergedParents = (parents.length > 0 ? parents : allTopics).map((p, index) => {
+              const pId = (p.id || '').trim();
+              const konuAdi = p.konu_adi;
+              const key = normalize(konuAdi);
+              const existing = key ? existingMap.get(key) : null;
+
+              let kaynaklar = dersResources.map(r => ({ ...r }));
+              if (existing && Array.isArray(existing.kaynaklar) && existing.kaynaklar.length > 0) {
+                const existingByName = new Map();
+                existing.kaynaklar.forEach(res => {
+                  const kKey = normalize(res.kaynak_adi);
+                  if (kKey && !existingByName.has(kKey)) {
+                    existingByName.set(kKey, res);
+                  }
+                });
+                const mergedResources = [];
+                dersResources.forEach(dr => {
+                  const dKey = normalize(dr.kaynak_adi);
+                  const ex = dKey ? existingByName.get(dKey) : null;
+                  mergedResources.push(ex ? ex : { ...dr });
+                });
+                existing.kaynaklar.forEach(res => {
+                  const rKey = normalize(res.kaynak_adi);
+                  const inBase = dersResources.some(dr => normalize(dr.kaynak_adi) === rKey);
+                  if (!inBase) mergedResources.push(res);
+                });
+                kaynaklar = mergedResources;
+              }
+
+              const subtopics = childrenMap.has(pId) ? childrenMap.get(pId).map(c => c.konu_adi) : [];
+
+              if (existing) {
+                return {
+                  ...existing,
+                  konu: konuAdi,
+                  sira: p.sira || existing.sira || index + 1,
+                  kaynaklar,
+                  subtopics
+                };
+              }
+
+              return {
+                id: null,
+                konu: konuAdi,
+                sira: p.sira || index + 1,
+                durum: 'Konuya Gelinmedi',
+                tarih: null,
+                kaynaklar,
+                subtopics
+              };
+            });
+
+            const usedKeys = new Set(mergedParents.map(t => normalize(t.konu)));
+            const extras = [];
+            existingKonular.forEach(k => {
+              const key = normalize(k.konu);
+              // Alt konu gibi görünenleri (tire ile başlayan) ana konu olarak ekleme
+              const isSubtopicStyle = (k.konu || '').trim().match(/^[-–]/);
+              if (key && !usedKeys.has(key) && !childKeys.has(key) && !isSubtopicStyle) {
+                extras.push(k);
+              }
+            });
+
+            finalKonular = [...mergedParents, ...extras];
+          }
+        } catch {}
+      }
+
+      if (finalKonular.length > 0) {
+        setKonuIlerlemesi(finalKonular);
       } else {
         const defaultKonular = Array.from({ length: 10 }, (_, i) => ({
           id: null,
@@ -2541,7 +2692,16 @@ const VeliPanel = () => {
                       }}
                     >
                       <div style={{fontSize: '15px', fontWeight: 600, color: '#1f2937'}}>
-                        {konu.konu}
+                        {`${konu.sira}. ${konu.konu.replace(/^[\d]+\.\s*/, '')}`}
+                        {Array.isArray(konu.subtopics) && konu.subtopics.length > 0 && (
+                          <div style={{marginTop: 8, color: '#374151'}}>
+                            {konu.subtopics.map((st, i) => (
+                              <div key={`${konu.konu}-st-${i}`} style={{fontSize: 12, marginLeft: 24}}>
+                                {`-${i + 1}.${st}`}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div style={{fontSize: '14px', color: '#6b7280'}}>
                         {konu.tarih || '-'}

@@ -223,7 +223,7 @@ const createEmptyRoutineForm = () => ({
   soruSayisi: ''
 });
 
-const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnly = false }) => {
+const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnly = false, examComponents = [] }) => {
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -507,6 +507,38 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
   useEffect(() => {
     const fetchSubjects = async () => {
+      // 1. Eğer examComponents (Oturumlar) varsa öncelikli olarak onları kullan
+      if (examComponents && examComponents.length > 0) {
+        setIsDersLoading(true);
+        try {
+          let allCompSubjects = [];
+          for (const comp of examComponents) {
+            const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(comp.id)}`);
+            if (data.success && data.subjects) {
+              allCompSubjects = [...allCompSubjects, ...data.subjects];
+            }
+          }
+          
+          // Tekrarlanan dersleri temizle
+          const uniqueSubjects = [];
+          const seen = new Set();
+          allCompSubjects.forEach(s => {
+            const key = s.ders_adi; 
+            if (!seen.has(key)) {
+              seen.add(key);
+              uniqueSubjects.push(s);
+            }
+          });
+          
+          setDynamicSubjects(uniqueSubjects);
+        } catch (error) {
+          console.error('Bileşen dersleri yüklenemedi:', error);
+        } finally {
+          setIsDersLoading(false);
+        }
+        return;
+      }
+
       if (!studentAlan) {
         setDynamicSubjects([]);
         return;
@@ -541,7 +573,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
       }
     };
     fetchSubjects();
-  }, [studentAlan]);
+  }, [studentAlan, examComponents]);
 
   // Seçili ders değiştiğinde konuları çek
   const fetchTopicsForSubject = async (subjectName) => {
@@ -1041,9 +1073,32 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     setCurrentWeek(new Date());
   };
 
+  const handleConfirmRow = async (e, prog) => {
+    e.stopPropagation();
+    const inputs = statusInputs[prog.id] || {};
+    
+    // Mevcut veya yeni değerleri al
+    const dogru = inputs.dogru !== undefined ? inputs.dogru : prog.dogru;
+    const yanlis = inputs.yanlis !== undefined ? inputs.yanlis : prog.yanlis;
+    const bos = inputs.bos !== undefined ? inputs.bos : prog.bos;
+    
+    // Sayısal değerlere çevir
+    const d = parseInt(dogru) || 0;
+    const y = parseInt(yanlis) || 0;
+    const b = parseInt(bos) || 0;
+    
+    // Geçici program objesi oluştur ve durumu hesapla
+    const tempProg = { ...prog, dogru: d, yanlis: y, bos: b };
+    const newStatus = calculateStatus(tempProg);
+    
+    // Kaydet
+    await handleStatusUpdate(prog, newStatus, d, y, b);
+  };
+
   const handleYapildiClick = (prog) => {
-    // Öğretmen veya öğrenci fark etmeksizin, soru çözümü veya konu anlatımı ise sonuç kontrolü yap
-    if (prog?.program_tipi === 'soru_cozum' || prog?.program_tipi === 'konu_anlatim') {
+    // Öğretmen veya öğrenci fark etmeksizin, sadece soru çözümü ise sonuç kontrolü yap
+    // Konu anlatımında doğru/yanlış/boş girilmesine gerek yok
+    if (prog?.program_tipi === 'soru_cozum') {
       const originalInputs = {
         dogru: (prog.dogru !== null && prog.dogru !== undefined && prog.dogru !== '') ? parseInt(prog.dogru) || 0 : 0,
         yanlis: (prog.yanlis !== null && prog.yanlis !== undefined && prog.yanlis !== '') ? parseInt(prog.yanlis) || 0 : 0,
@@ -1132,18 +1187,10 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   };
 
   const handleResultBlur = (program) => {
+    // onBlur'da artık otomatik kaydetme yapmıyoruz
+    // Kullanıcı onay butonuna bastığında kaydedilecek
     const inputs = statusInputs[program.id];
-    if (!inputs) return; // No changes made
-    
-    const dogru = inputs.dogru !== undefined ? inputs.dogru : program.dogru;
-    const yanlis = inputs.yanlis !== undefined ? inputs.yanlis : program.yanlis;
-    const bos = inputs.bos !== undefined ? inputs.bos : program.bos;
-    
-    // Calculate new status locally
-    const tempProg = { ...program, dogru, yanlis, bos };
-    const newStatus = calculateStatus(tempProg);
-    
-    handleStatusUpdate(program, newStatus, dogru, yanlis, bos);
+    if (!inputs) return;
   };
 
   const handleAddProgramClick = (day) => {
@@ -1428,8 +1475,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
   // Durum hesaplama fonksiyonu
   const calculateStatus = (program) => {
-    // Eğer soru çözümü veya konu anlatımı değilse, direkt durumu döndür
-    if ((program.program_tipi !== 'soru_cozum' && program.program_tipi !== 'konu_anlatim') || !program.soru_sayisi) {
+    const tip = program.program_tipi;
+    // Sadece soru çözümü ve deneme için otomatik hesaplama yap
+    if (tip !== 'soru_cozum' && tip !== 'deneme') {
       return program.durum || 'yapilmadi';
     }
 
@@ -1441,6 +1489,12 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
     // Toplam hesapla
     const toplam = dogru + yanlis + bos;
+
+    // Deneme için soru sayısı yoksa basit kuralla belirle
+    if (tip === 'deneme' && soruSayisi === 0) {
+      if (toplam > 0) return 'yapildi';
+      return 'yapilmadi';
+    }
 
     // Validasyon: Toplam soru sayısını geçemez
     if (toplam > soruSayisi) {
@@ -1525,7 +1579,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
         kaynak: programForm.kaynak || null,
         aciklama: programForm.aciklama ? programForm.aciklama.trim() : null,
         youtubeLinki: programForm.hasYoutubeLinki && programForm.youtubeLinki ? programForm.youtubeLinki.trim() : null,
-        soruSayisi: programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
+        soruSayisi: programForm.programTipi === 'soru_cozum' && programForm.soruSayisi ? parseInt(programForm.soruSayisi) : null,
         baslangicSaati: programForm.baslangicSaati,
         bitisSaati: programForm.bitisSaati
       };
@@ -1823,20 +1877,20 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   };
 
   const handleDragStart = (e, program) => {
-    if (readOnly) return;
+    if (readOnly || isStudentPanel) return;
     setDraggedProgram(program);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/html', e.target);
   };
 
   const handleDragOver = (e) => {
-    if (readOnly) return;
+    if (readOnly || isStudentPanel) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = async (e, targetDay) => {
-    if (readOnly) return;
+    if (readOnly || isStudentPanel) return;
     e.preventDefault();
     
     if (!draggedProgram) return;
@@ -2492,7 +2546,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                   : 'Soru Çözümü'}
               </span>
             </div>
-            {soruSayisi && (
+            {programTipi === 'soru_cozum' && soruSayisi && (
               <span className="program-item-type-count">{soruSayisi} soru</span>
             )}
           </div>
@@ -3184,7 +3238,15 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                 <label>Program Tipi</label>
                                 <select
                                   value={programForm.programTipi}
-                                  onChange={(e) => setProgramForm({ ...programForm, programTipi: e.target.value })}
+                                  onChange={(e) => {
+                                    const newType = e.target.value;
+                                    setProgramForm({
+                                      ...programForm,
+                                      programTipi: newType,
+                                      // Soru sayısını sadece soru çözümünde tut
+                                      soruSayisi: newType === 'soru_cozum' ? programForm.soruSayisi : ''
+                                    });
+                                  }}
                                   required
                                 >
                                   <option value="soru_cozum">Soru Çözümü</option>
@@ -3271,9 +3333,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                           style={{ 
                             background: getGradientBackground(getProgramColor(prog))
                           }}
-                          draggable={!isRoutine}
+                          draggable={!isRoutine && !isStudentPanel}
                           onDragStart={(e) => {
-                            if (isRoutine) return;
+                            if (isRoutine || isStudentPanel) return;
                             handleDragStart(e, prog);
                           }}
                           onClick={(e) => e.stopPropagation()}
@@ -3351,21 +3413,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 2 }}>
                               {prog.konu && (
-                                <span className="program-item-konu" style={{ flexShrink: 0, maxWidth: prog.kaynak ? '35%' : '100%' }}>{prog.konu}</span>
+                                <span className="program-item-konu" style={{ flexShrink: 0, maxWidth: '100%' }}>{prog.konu}</span>
                               )}
-                              {prog.kaynak && (
-                                <span className="program-item-kaynak-inline" title={prog.kaynak} style={{
-                                    fontSize: '11px', 
-                                    opacity: 0.8, 
-                                    whiteSpace: 'nowrap', 
-                                    overflow: 'hidden', 
-                                    textOverflow: 'ellipsis',
-                                    flex: 1,
-                                    minWidth: 0
-                                }}>
-                                   📚 {prog.kaynak}
-                                </span>
-                              )}
+                              {/* Kaynak removed from here */}
                             </div>
                           </div>
 
@@ -3374,40 +3424,73 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                             <div className="program-item-type-title">
                               <span>
                                 {getProgramTypeName(prog.program_tipi)}
-                                {prog.soru_sayisi ? ` - ${prog.soru_sayisi} soru` : ''}
+                                  {prog.program_tipi === 'soru_cozum' && prog.soru_sayisi ? ` - ${prog.soru_sayisi} soru` : ''}
                               </span>
                             </div>
                           </div>
 
                           {/* Details section: Kaynak, Açıklama, Soru Sayısı */}
-                          <div className="program-item-details">
-                            <div className="program-item-kaynak-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%', gap: 4, minHeight: 24 }}>
+                          <div className="program-item-details" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                            <div className="program-item-kaynak-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 4, minHeight: 32, marginBottom: 4 }}>
+                                {prog.kaynak ? (
+                                    <div className="program-item-kaynak-display" style={{fontSize: '12px', color: 'rgb(255,255,255)', display: 'flex', alignItems: 'center', gap: 4, flex: 1, overflow: 'hidden',  borderRadius: '6px', marginRight: 4}}>
+
+                                        <span style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500}} title={prog.kaynak}>{prog.kaynak}</span>
+                                    </div>
+                                ) : <div style={{flex: 1}}></div>}
+
                                 {(prog.program_tipi === 'soru_cozum' || prog.program_tipi === 'deneme') && (
-                                  <div className="result-inputs" onClick={(e) => e.stopPropagation()}>
-                                    <input 
-                                      className="result-box correct"
-                                      placeholder="D"
-                                      value={statusInputs[prog.id]?.dogru ?? prog.dogru ?? ''}
-                                      onChange={(e) => handleResultChange(prog.id, 'dogru', e.target.value)}
-                                      onBlur={() => handleResultBlur(prog)}
-                                      title="Doğru"
-                                    />
-                                    <input 
-                                      className="result-box incorrect"
-                                      placeholder="Y"
-                                      value={statusInputs[prog.id]?.yanlis ?? prog.yanlis ?? ''}
-                                      onChange={(e) => handleResultChange(prog.id, 'yanlis', e.target.value)}
-                                      onBlur={() => handleResultBlur(prog)}
-                                      title="Yanlış"
-                                    />
-                                    <input 
-                                      className="result-box empty"
-                                      placeholder="B"
-                                      value={statusInputs[prog.id]?.bos ?? prog.bos ?? ''}
-                                      onChange={(e) => handleResultChange(prog.id, 'bos', e.target.value)}
-                                      onBlur={() => handleResultBlur(prog)}
-                                      title="Boş"
-                                    />
+                                  <div className="result-inputs-container" style={{display: 'flex', alignItems: 'center', gap: 2}}>
+                                      <div className="result-inputs" onClick={(e) => e.stopPropagation()}>
+                                        <input 
+                                          className="result-box correct"
+                                          placeholder="D"
+                                          value={statusInputs[prog.id]?.dogru ?? prog.dogru ?? ''}
+                                          onChange={(e) => handleResultChange(prog.id, 'dogru', e.target.value)}
+                                          onBlur={() => handleResultBlur(prog)}
+                                          title="Doğru"
+                                        />
+                                        <input 
+                                          className="result-box incorrect"
+                                          placeholder="Y"
+                                          value={statusInputs[prog.id]?.yanlis ?? prog.yanlis ?? ''}
+                                          onChange={(e) => handleResultChange(prog.id, 'yanlis', e.target.value)}
+                                          onBlur={() => handleResultBlur(prog)}
+                                          title="Yanlış"
+                                        />
+                                        <input 
+                                          className="result-box empty"
+                                          placeholder="B"
+                                          value={statusInputs[prog.id]?.bos ?? prog.bos ?? ''}
+                                          onChange={(e) => handleResultChange(prog.id, 'bos', e.target.value)}
+                                          onBlur={() => handleResultBlur(prog)}
+                                          title="Boş"
+                                        />
+                                      </div>
+                                      <button 
+                                        className="confirm-results-btn"
+                                        onClick={(e) => handleConfirmRow(e, prog)}
+                                        style={{
+                                            border: 'none',
+                                            background: '#10b981',
+                                            color: 'white',
+                                            borderRadius: '6px',
+                                            width: '20px',
+                                            height: '24px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
+                                            transition: 'transform 0.1s'
+                                        }}
+                                        title="Kaydet ve Durumu Güncelle"
+                                        onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+                                        onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                      >
+                                        <FontAwesomeIcon icon={faCheck} style={{fontSize: '14px'}} />
+                                      </button>
                                   </div>
                                 )}
                             </div>
@@ -3427,7 +3510,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                             ) : (
                               <div style={{ height: '28px' }}></div>
                             )}
-                            {prog.youtube_linki && (
+                            {prog.youtube_linki ? (
                               <div className="program-item-youtube-link" style={{marginTop: 6}}>
                                 <a 
                                   href={prog.youtube_linki} 
@@ -3447,7 +3530,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                   ▶️ YouTube Video
                                 </a>
                               </div>
-                            )}
+                            ):(<div style={{ height: '24px' }}></div>)}
                           </div>
                           
                           {/* Status */}

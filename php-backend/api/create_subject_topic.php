@@ -12,11 +12,17 @@ function generateId($len=24){ return bin2hex(random_bytes($len/2)); }
 try {
     $id = generateId();
     $dersId = trim($data->dersId ?? '');
+    $parentId = isset($data->parentId) ? trim($data->parentId) : null;
     $konuAdi = trim($data->konuAdi ?? '');
     $sira = isset($data->sira) ? intval($data->sira) : null;
     if ($dersId === '' || $konuAdi === '') { http_response_code(400); echo json_encode(['success'=>false,'message'=>'dersId ve konuAdi gerekli']); exit; }
-    $stmt = $db->prepare("INSERT INTO sinav_konulari (id, ders_id, konu_adi, sira, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())");
-    $ok = $stmt->execute([$id, $dersId, $konuAdi, $sira]);
+    if ($parentId) {
+        $stmt = $db->prepare("INSERT INTO sinav_alt_konulari (id, konu_id, alt_konu_adi, sira, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())");
+        $ok = $stmt->execute([$id, $parentId, $konuAdi, $sira]);
+    } else {
+        $stmt = $db->prepare("INSERT INTO sinav_konulari (id, ders_id, parent_id, konu_adi, sira, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, NOW(), NOW())");
+        $ok = $stmt->execute([$id, $dersId, $parentId, $konuAdi, $sira]);
+    }
     echo json_encode(['success'=>$ok, 'id'=>$id]);
 } catch (Exception $e) {
     http_response_code(500);

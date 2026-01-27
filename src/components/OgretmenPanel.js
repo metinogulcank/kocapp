@@ -1831,7 +1831,7 @@ const MEETING_DAY_OPTIONS = [
 
       if (subject && subject.id) {
         try {
-          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}`);
+          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}&includeSubtopics=true`);
           if (topicsData.success && Array.isArray(topicsData.topics) && topicsData.topics.length > 0) {
             let dersResources = [];
             try {
@@ -1844,7 +1844,7 @@ const MEETING_DAY_OPTIONS = [
               }
             } catch (resErr) {}
 
-            const normalize = (v) => (v || '').trim().toLowerCase();
+            const normalize = (v) => (v || '').replace(/^[\d\.\-\s]+/, '').trim().toLocaleLowerCase('tr-TR');
             const existingMap = new Map();
             existingKonular.forEach(k => {
               const key = normalize(k.konu);
@@ -1853,8 +1853,55 @@ const MEETING_DAY_OPTIONS = [
               }
             });
 
-            const merged = topicsData.topics.map((t, index) => {
-              const konuAdi = t.konu_adi;
+            // Hiyerarşik sıralama (Parent -> Children)
+            const allTopics = topicsData.topics;
+            let parents = allTopics.filter(t => !t.parent_id || t.parent_id === '0');
+            let children = allTopics.filter(t => t.parent_id && t.parent_id !== '0');
+            
+            const childrenMap = new Map();
+            const childKeys = new Set();
+
+            // DB'den gelen hiyerarşiyi map'e ekle
+            children.forEach(c => {
+                const pId = String(c.parent_id || '').trim();
+                if (pId && pId !== '0') {
+                  if (!childrenMap.has(pId)) childrenMap.set(pId, []);
+                  childrenMap.get(pId).push(c);
+                }
+            });
+
+            // İsimlendirmeden hiyerarşi çıkarımı (Tüm dersler için genel mantık)
+            const inferredParents = [];
+            let lastParent = null;
+            
+            // Sıralı olarak parents listesini işle
+            parents.forEach(p => {
+                const name = (p.konu_adi || '').trim();
+                // Alt konu işareti var mı? (- veya –)
+                if ((name.startsWith('-') || name.startsWith('–')) && lastParent) {
+                    // Bu bir alt konudur, lastParent'ın altına ekle
+                    const lpId = String(lastParent.id || '').trim();
+                    if (lpId) {
+                        if (!childrenMap.has(lpId)) childrenMap.set(lpId, []);
+                        childrenMap.get(lpId).push(p);
+                    }
+                    // Children listesine de ekle
+                    children.push(p);
+                } else {
+                    // Bu bir ana konudur
+                    inferredParents.push(p);
+                    lastParent = p;
+                }
+            });
+            
+            // Parents listesini güncelle
+            parents = inferredParents;
+
+            children.forEach(c => childKeys.add(normalize(c.konu_adi)));
+
+            const mergedParents = (parents.length > 0 ? parents : allTopics).map((p, index) => {
+              const pId = String(p.id || '').trim();
+              const konuAdi = p.konu_adi;
               const key = normalize(konuAdi);
               const existing = key ? existingMap.get(key) : null;
 
@@ -1888,34 +1935,41 @@ const MEETING_DAY_OPTIONS = [
                 kaynaklar = mergedResources;
               }
 
+              const subtopics = childrenMap.has(pId) ? childrenMap.get(pId).map(c => c.konu_adi) : [];
+
               if (existing) {
                 return {
                   ...existing,
                   konu: konuAdi,
-                  sira: t.sira || existing.sira || index + 1,
-                  kaynaklar
+                  sira: p.sira || existing.sira || index + 1,
+                  kaynaklar,
+                  subtopics
                 };
               }
 
               return {
                 id: null,
                 konu: konuAdi,
-                sira: t.sira || index + 1,
+                sira: p.sira || index + 1,
                 durum: 'Konuya Gelinmedi',
                 tarih: null,
-                kaynaklar
+                kaynaklar,
+                subtopics
               };
             });
 
-            const usedKeys = new Set(topicsData.topics.map(t => normalize(t.konu_adi)));
+            const usedKeys = new Set(mergedParents.map(t => normalize(t.konu)));
+            const extras = [];
             existingKonular.forEach(k => {
               const key = normalize(k.konu);
-              if (key && !usedKeys.has(key)) {
-                merged.push(k);
+              // Alt konu gibi görünenleri (tire ile başlayan) ana konu olarak ekleme
+              const isSubtopicStyle = (k.konu || '').trim().match(/^[-–]/);
+              if (key && !usedKeys.has(key) && !childKeys.has(key) && !isSubtopicStyle) {
+                extras.push(k);
               }
             });
 
-            finalKonular = merged;
+            finalKonular = [...mergedParents, ...extras];
           }
         } catch (topicErr) {
           console.error('Varsayılan konular çekilemedi:', topicErr);
@@ -1965,17 +2019,18 @@ const MEETING_DAY_OPTIONS = [
     const payloadKonular = konularOverride || konuIlerlemesi;
     setSavingIlerleme(true);
     try {
-      const formBody = new URLSearchParams({
+      const payload = {
         studentId: studentIdForPayload,
         ders: (selectedDersForIlerleme || '').trim(),
-        konular: JSON.stringify(payloadKonular)
-      }).toString();
+        konular: payloadKonular
+      };
+      
       const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/save_konu_ilerlemesi.php`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: formBody
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         }
       );
       if (data.success) {
@@ -2974,6 +3029,7 @@ const MEETING_DAY_OPTIONS = [
               <OgrenciProgramTab 
                 student={selectedStudent} 
                 teacherId={JSON.parse(localStorage.getItem('user'))?.id}
+                examComponents={examComponents}
               />
             ) : activeMenu === 'plan-program' ? (
               <div className="plan-program-content">
@@ -5572,122 +5628,131 @@ const MEETING_DAY_OPTIONS = [
                                     icon={faGripVertical}
                                     style={{color: '#9ca3af', fontSize: '18px'}}
                                   />
-                  </div>
+                                </div>
 
-                                {/* Konu (sabit) */}
+                                {/* Konu ve alt konular */}
                                 <div style={{fontSize: '15px', fontWeight: 600, color: '#1f2937'}}>
-                                  {konu.konu}
-                    </div>
+                        {`${konu.sira}. ${konu.konu.replace(/^[\d]+\.\s*/, '')}`}
+                        {Array.isArray(konu.subtopics) && konu.subtopics.length > 0 && (
+                          <div style={{marginTop: 8, color: '#374151'}}>
+                            {konu.subtopics.map((st, i) => (
+                              <div key={`${konu.konu}-st-${i}`} style={{fontSize: 12, marginLeft: 24}}>
+                                {`-${i + 1}.${typeof st === 'object' ? (st.baslik || st.alt_konu_adi || '') : st}`}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
                                 {/* Tarih */}
                                 <div style={{fontSize: '14px', color: '#6b7280'}}>
                                   {konu.tarih || '-'}
-                      </div>
+                                </div>
 
                                 {/* Durum */}
-                                <div>
-                                  <select
-                                    value={konu.durum}
-                                    onChange={(e) => handleDurumChange(index, e.target.value)}
-                                    style={{
-                                      width: '100%',
-                                      padding: '8px 12px',
-                                      border: '1px solid #d1d5db',
-                                      borderRadius: 6,
-                                      fontSize: '14px',
-                                      background: 'white',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    <option value="Konuya Gelinmedi">Konuya Gelinmedi</option>
-                                    <option value="Daha Sonra Yapılacak">Daha Sonra Yapılacak</option>
-                                    <option value="Konuyu Anlamadım">Konuyu Anlamadım</option>
-                                    <option value="Çalıştım">Çalıştım</option>
-                                  </select>
-                </div>
+                                  <div>
+                                    <select
+                                      value={konu.durum}
+                                      onChange={(e) => handleDurumChange(index, e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        padding: '8px 12px',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: 6,
+                                        fontSize: '14px',
+                                        background: 'white',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      <option value="Konuya Gelinmedi">Konuya Gelinmedi</option>
+                                      <option value="Daha Sonra Yapılacak">Daha Sonra Yapılacak</option>
+                                      <option value="Konuyu Anlamadım">Konuyu Anlamadım</option>
+                                      <option value="Çalıştım">Çalıştım</option>
+                                    </select>
+                                  </div>
 
                                 {/* Kaynaklar */}
-                                <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
-                                  {konu.kaynaklar && konu.kaynaklar.length > 0 ? (
-                                    <>
-                                      {konu.kaynaklar.map((kaynak, kaynakIndex) => (
-                                        <div
-                                          key={kaynak.id || `kaynak-${kaynakIndex}`}
-                                          style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            padding: '4px 8px',
-                                            background: kaynak.tamamlandi ? '#d1fae5' : '#f3f4f6',
-                                            borderRadius: 6,
-                                            fontSize: '12px'
-                                          }}
-                                        >
-                    <button 
-                                            onClick={() => handleKaynakToggle(index, kaynakIndex)}
+                                  <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
+                                    {konu.kaynaklar && konu.kaynaklar.length > 0 ? (
+                                      <>
+                                        {konu.kaynaklar.map((kaynak, kaynakIndex) => (
+                                          <div
+                                            key={kaynak.id || `kaynak-${kaynakIndex}`}
                                             style={{
-                                              width: 18,
-                                              height: 18,
-                                              border: `2px solid ${kaynak.tamamlandi ? '#10b981' : '#9ca3af'}`,
-                                              borderRadius: 4,
-                                              background: kaynak.tamamlandi ? '#10b981' : 'white',
-                                              cursor: 'pointer',
                                               display: 'flex',
                                               alignItems: 'center',
-                                              justifyContent: 'center',
-                                              padding: 0
-                                            }}
-                                          >
-                                            {kaynak.tamamlandi && (
-                                              <FontAwesomeIcon icon={faCheck} style={{color: 'white', fontSize: '10px'}} />
-                                            )}
-                    </button>
-                                          <span style={{color: '#374151'}}>{kaynak.kaynak_adi}</span>
-                    <button 
-                                            onClick={() => handleKaynakSil(index, kaynakIndex)}
-                                            style={{
-                                              background: 'none',
-                                              border: 'none',
-                                              cursor: 'pointer',
-                                              padding: 0,
-                                              color: '#ef4444',
+                                              gap: 6,
+                                              padding: '4px 8px',
+                                              background: kaynak.tamamlandi ? '#d1fae5' : '#f3f4f6',
+                                              borderRadius: 6,
                                               fontSize: '12px'
                                             }}
                                           >
-                                            <FontAwesomeIcon icon={faTrash} />
-                    </button>
-                  </div>
-                                      ))}
-                                    </>
-                                  ) : null}
-                </div>
+                                            <button 
+                                              onClick={() => handleKaynakToggle(index, kaynakIndex)}
+                                              style={{
+                                                width: 18,
+                                                height: 18,
+                                                border: `2px solid ${kaynak.tamamlandi ? '#10b981' : '#9ca3af'}`,
+                                                borderRadius: 4,
+                                                background: kaynak.tamamlandi ? '#10b981' : 'white',
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                padding: 0
+                                              }}
+                                            >
+                                              {kaynak.tamamlandi && (
+                                                <FontAwesomeIcon icon={faCheck} style={{color: 'white', fontSize: '10px'}} />
+                                              )}
+                                            </button>
+                                            <span style={{color: '#374151'}}>{kaynak.kaynak_adi}</span>
+                                            <button 
+                                              onClick={() => handleKaynakSil(index, kaynakIndex)}
+                                              style={{
+                                                background: 'none',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                padding: 0,
+                                                color: '#ef4444',
+                                                fontSize: '12px'
+                                              }}
+                                            >
+                                              <FontAwesomeIcon icon={faTrash} />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </>
+                                    ) : null}
+                                  </div>
 
                                 {/* Yüzde */}
-                                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                                  <div style={{
-                                    width: '100%',
-                                    height: 8,
-                                    background: '#e5e7eb',
-                                    borderRadius: 4,
-                                    overflow: 'hidden'
-                                  }}>
+                                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                                     <div style={{
-                                      width: `${yuzde}%`,
-                                      height: '100%',
-                                      background: yuzdeColor,
-                                      transition: 'width 0.3s ease'
-                                    }} />
-                      </div>
-                                  <span style={{
-                                    fontSize: '14px',
-                                    fontWeight: 600,
-                                    color: yuzdeColor,
-                                    minWidth: 40,
-                                    textAlign: 'right'
-                                  }}>
-                                    %{yuzde}
-                                  </span>
-                    </div>
+                                      width: '100%',
+                                      height: 8,
+                                      background: '#e5e7eb',
+                                      borderRadius: 4,
+                                      overflow: 'hidden'
+                                    }}>
+                                      <div style={{
+                                        width: `${yuzde}%`,
+                                        height: '100%',
+                                        background: yuzdeColor,
+                                        transition: 'width 0.3s ease'
+                                      }} />
+                                    </div>
+                                    <span style={{
+                                      fontSize: '14px',
+                                      fontWeight: 600,
+                                      color: yuzdeColor,
+                                      minWidth: 40,
+                                      textAlign: 'right'
+                                    }}>
+                                      %{yuzde}
+                                    </span>
+                                  </div>
                           </div>
                             );
                           })}

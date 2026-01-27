@@ -11,12 +11,22 @@ $data = json_decode(file_get_contents('php://input'));
 try {
     $id = trim($data->id ?? '');
     if ($id === '') { http_response_code(400); echo json_encode(['success'=>false,'message'=>'id gerekli']); exit; }
+    $isSubTopic = isset($data->parentId);
+    $table = $isSubTopic ? 'sinav_alt_konulari' : 'sinav_konulari';
+    
     $fields = []; $params = [];
-    foreach (['konuAdi'=>'konu_adi','sira'=>'sira'] as $k=>$col) {
-        if (isset($data->$k)) { $fields[] = "$col = ?"; $params[] = $data->$k; }
+    if (isset($data->konuAdi)) {
+        $col = $isSubTopic ? 'alt_konu_adi' : 'konu_adi';
+        $fields[] = "$col = ?";
+        $params[] = $data->konuAdi;
     }
+    if (isset($data->sira)) {
+        $fields[] = "sira = ?";
+        $params[] = $data->sira;
+    }
+    
     if (!$fields) { echo json_encode(['success'=>true]); exit; }
-    $sql = "UPDATE sinav_konulari SET ".implode(', ',$fields).", updatedAt = NOW() WHERE id = ?";
+    $sql = "UPDATE $table SET ".implode(', ',$fields).", updatedAt = NOW() WHERE id = ?";
     $params[] = $id;
     $stmt = $db->prepare($sql);
     $ok = $stmt->execute($params);
