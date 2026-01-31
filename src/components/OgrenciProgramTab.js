@@ -4269,20 +4269,22 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
       {/* Konu Başarımları Modal */}
       {showTopicAnalysisModal && (
-        <div className="topic-analysis-modal-overlay" onClick={() => setShowTopicAnalysisModal(false)}>
+        <div className="topic-analysis-modal-overlay">
           <div 
             className="topic-analysis-modal" 
             ref={topicAnalysisModalRef}
             onClick={(e) => e.stopPropagation()}
             style={{
               position: 'fixed',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '800px',
-              height: '600px',
-              minWidth: '600px',
-              minHeight: '400px'
+              top: '0',
+              right: '0',
+              transform: 'none',
+              width: '360px',
+              height: '100vh',
+              minWidth: '300px',
+              maxWidth: '400px',
+              minHeight: '100vh',
+              maxHeight: '100vh'
             }}
           >
             <div className="topic-analysis-modal-header" ref={topicAnalysisModalHeaderRef}>

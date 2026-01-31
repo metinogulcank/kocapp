@@ -211,11 +211,11 @@ const VeliPanel = () => {
     { id: 'ana-sayfa', icon: faHome, label: 'Ana Sayfa' },
     { id: 'bildirimler', icon: faBell, label: 'Bildirimler' },
     { id: 'plan-program', icon: faBook, label: 'Plan/ Program' },
-    { id: 'gunluk-soru', icon: faStickyNote, label: 'Soru/Süre/Konu Dağılımı' },
     { id: 'ders-basari', icon: faTrophy, label: 'Ders/Konu Bazlı Başarım' },
     { id: 'konu-ilerlemesi', icon: faClipboardList, label: 'Kaynak ve Konu İlerlemesi' },
     { id: 'brans-denemeleri', icon: faBullseye, label: 'Branş Denemeleri' },
     { id: 'genel-denemeler', icon: faClock, label: 'Genel Denemeler' },
+    { id: 'gunluk-soru', icon: faStickyNote, label: 'Soru/Süre/Konu Dağılımı' },
     { id: 'muhasebe', icon: faMoneyBill, label: 'Muhasebe' },
     { id: 'profil', icon: faUser, label: 'Profilim' }
   ];

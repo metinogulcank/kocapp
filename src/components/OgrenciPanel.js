@@ -204,6 +204,14 @@ const OgrenciPanel = () => {
   const [bransKonular, setBransKonular] = useState([]);
   const [bransKonuDetayAcik, setBransKonuDetayAcik] = useState(false);
   const [bransKaydediliyor, setBransKaydediliyor] = useState(false);
+  const [shakeFields, setShakeFields] = useState({});
+
+  const triggerShake = (fieldId) => {
+    setShakeFields(prev => ({ ...prev, [fieldId]: true }));
+    setTimeout(() => {
+      setShakeFields(prev => ({ ...prev, [fieldId]: false }));
+    }, 500);
+  };
 
   // Genel Denemeler state
   const [genelDenemeFilter, setGenelDenemeFilter] = useState('son-deneme');
@@ -290,11 +298,11 @@ const OgrenciPanel = () => {
   const menuItems = [
     { id: 'ana-sayfa', icon: faHome, label: 'Ana Sayfa' },
     { id: 'plan-program', icon: faBook, label: 'Plan/ Program' },
-    { id: 'gunluk-soru', icon: faStickyNote, label: 'Soru/Süre/Konu Dağılımı' },
     { id: 'ders-basari', icon: faTrophy, label: 'Ders/Konu Bazlı Başarım' },
     { id: 'konu-ilerlemesi', icon: faClipboardList, label: 'Kaynak ve Konu İlerlemesi' },
     { id: 'brans-denemeleri', icon: faBullseye, label: 'Branş Denemeleri' },
     { id: 'genel-denemeler', icon: faClock, label: 'Genel Denemeler' },
+    { id: 'gunluk-soru', icon: faStickyNote, label: 'Soru/Süre/Konu Dağılımı' },
     { id: 'bildirimler', icon: faBell, label: 'Bildirimlerim' },
     { id: 'profil', icon: faUser, label: 'Profilim' }
   ];
@@ -1682,14 +1690,72 @@ const OgrenciPanel = () => {
     return net.toFixed(2);
   }, [bransDenemeForm.dogru, bransDenemeForm.yanlis]);
 
+  const findSubjectMetaByName = (name) => {
+    if (!name || !allSubjects || allSubjects.length === 0) return null;
+    const normalizedSearch = name.trim().toLowerCase();
+    let found = allSubjects.find(
+      (s) => (s.ders_adi || '').trim().toLowerCase() === normalizedSearch
+    );
+    if (!found) {
+      const searchWithoutPrefix = normalizedSearch
+        .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
+        .trim();
+      found = allSubjects.find((s) => {
+        const normalizedDers = (s.ders_adi || '').trim().toLowerCase();
+        const dersWithoutPrefix = normalizedDers
+          .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
+          .trim();
+        return dersWithoutPrefix === searchWithoutPrefix;
+      });
+    }
+    return found || null;
+  };
+
   // Öğrencinin alanına göre ders listesini belirle
   const bransDersList = useMemo(() => {
     return getDersList(bransExamType, student?.alan);
   }, [bransExamType, examComponents, student?.alan]);
 
   const handleBransFormChange = (field, value) => {
+    // Input validation
+    if (['dogru', 'yanlis', 'bos'].includes(field)) {
+      const soru = Number(bransDenemeForm.soruSayisi) || 0;
+      if (soru > 0) {
+        const val = Number(value) || 0;
+        
+        // 1. Check if individual value exceeds total questions
+        if (val > soru) {
+          triggerShake(field);
+          return;
+        }
+
+        // 2. Check if total exceeds total questions
+        const currentDogru = field === 'dogru' ? val : (Number(bransDenemeForm.dogru) || 0);
+        const currentYanlis = field === 'yanlis' ? val : (Number(bransDenemeForm.yanlis) || 0);
+        const currentBos = field === 'bos' ? val : (Number(bransDenemeForm.bos) || 0);
+
+        if (currentDogru + currentYanlis + currentBos > soru) {
+          triggerShake(field);
+          return;
+        }
+      }
+    }
+
     setBransDenemeForm((prev) => {
       const next = { ...prev, [field]: value };
+      
+      // Auto-calculate 'bos' if 'dogru' or 'yanlis' changes
+      if (['dogru', 'yanlis'].includes(field)) {
+        const soru = Number(next.soruSayisi) || 0;
+        if (soru > 0) {
+          const d = Number(next.dogru) || 0;
+          const y = Number(next.yanlis) || 0;
+          if (d + y <= soru) {
+            next.bos = soru - d - y;
+          }
+        }
+      }
+
       if (field === 'ders') {
         const meta = findSubjectMetaByName(value);
         if (meta && meta.soru_sayisi !== undefined && meta.soru_sayisi !== null) {
@@ -1783,8 +1849,16 @@ const OgrenciPanel = () => {
     }
     const soru = Number(bransDenemeForm.soruSayisi) || 0;
     const dogru = Number(bransDenemeForm.dogru) || 0;
-    const yanlis = Number(bransDenemeForm.yanlis) || 0;
-    const bos = Number(bransDenemeForm.bos) || 0;
+    let yanlis = Number(bransDenemeForm.yanlis) || 0;
+    let bos = Number(bransDenemeForm.bos) || 0;
+
+    // Auto-calculate bos
+    if (soru > 0) {
+      if (dogru + yanlis < soru && bos === 0) {
+        bos = soru - dogru - yanlis;
+      }
+    }
+
     if (soru > 0 && dogru + yanlis + bos > soru) {
       alert(
         `Toplam soru sayısı (Doğru + Yanlış + Boş: ${dogru + yanlis + bos}), ders için tanımlanan soru sayısından (${soru}) büyük olamaz.`
@@ -1817,10 +1891,10 @@ const OgrenciPanel = () => {
           ders: bransDenemeForm.ders,
           denemeAdi: bransDenemeForm.denemeAdi,
           denemeTarihi: bransDenemeForm.denemeTarihi,
-          soruSayisi: Number(bransDenemeForm.soruSayisi) || 0,
-          dogru: Number(bransDenemeForm.dogru) || 0,
-          yanlis: Number(bransDenemeForm.yanlis) || 0,
-          bos: Number(bransDenemeForm.bos) || 0,
+          soruSayisi: soru,
+          dogru: dogru,
+          yanlis: yanlis,
+          bos: bos,
           net: Number(bransNet) || 0,
           konular: payloadKonular
         })
@@ -1927,27 +2001,6 @@ const OgrenciPanel = () => {
     }));
   }, [bransDenemeList]);
 
-  const findSubjectMetaByName = (name) => {
-    if (!name || !allSubjects || allSubjects.length === 0) return null;
-    const normalizedSearch = name.trim().toLowerCase();
-    let found = allSubjects.find(
-      (s) => (s.ders_adi || '').trim().toLowerCase() === normalizedSearch
-    );
-    if (!found) {
-      const searchWithoutPrefix = normalizedSearch
-        .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
-        .trim();
-      found = allSubjects.find((s) => {
-        const normalizedDers = (s.ders_adi || '').trim().toLowerCase();
-        const dersWithoutPrefix = normalizedDers
-          .replace(/^(tyt|ayt|lgs|kpss)\s+/i, '')
-          .trim();
-        return dersWithoutPrefix === searchWithoutPrefix;
-      });
-    }
-    return found || null;
-  };
-
   const ensureBransDersSelected = () => {
     if (!bransDenemeForm.ders) {
       alert('Lütfen ders seçiniz');
@@ -2014,12 +2067,24 @@ const OgrenciPanel = () => {
             soruSayisi = 0;
           }
         }
+
+        const dogru = Number(data.dogru) || 0;
+        let yanlis = Number(data.yanlis) || 0;
+        let bos = Number(data.bos) || 0;
+
+        // Auto-calculate bos
+        if (soruSayisi > 0) {
+          if (dogru + yanlis < soruSayisi && bos === 0) {
+            bos = soruSayisi - dogru - yanlis;
+          }
+        }
+
         return {
           ders,
           soruSayisi,
-          dogru: Number(data.dogru) || 0,
-          yanlis: Number(data.yanlis) || 0,
-          bos: Number(data.bos) || 0,
+          dogru: dogru,
+          yanlis: yanlis,
+          bos: bos,
           net: Number(data.net) || 0
         };
       });
@@ -4373,6 +4438,7 @@ const OgrenciPanel = () => {
                     <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginBottom: 16}}>
                       {['soruSayisi','dogru','yanlis','bos'].map((field) => {
                         const labels = { soruSayisi: 'Soru Sayısı', dogru: 'Doğru', yanlis: 'Yanlış', bos: 'Boş' };
+                        const isShake = shakeFields[field];
                         return (
                           <div key={field} style={{background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 12}}>
                             <div style={{fontWeight: 700, color: '#111827', marginBottom: 6}}>{labels[field]}</div>
@@ -4384,6 +4450,7 @@ const OgrenciPanel = () => {
                                 if (!ensureBransDersSelected()) return;
                                 handleBransFormChange(field, e.target.value);
                               }}
+                              className={isShake ? 'shake-animation' : ''}
                               style={{width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db'}}
                             />
                             </div>
@@ -4833,10 +4900,18 @@ const OgrenciPanel = () => {
                                           value={dersData.soruSayisi}
                                           onChange={(e) => {
                                             const val = e.target.value;
-                                            setGenelDenemeDersler(prev => ({
-                                              ...prev,
-                                              [ders]: { ...prev[ders], soruSayisi: val }
-                                            }));
+                                            const newSoru = Number(val) || 0;
+                                            const d = Number(genelDenemeDersler[ders]?.dogru) || 0;
+                                            const y = Number(genelDenemeDersler[ders]?.yanlis) || 0;
+                                            if (newSoru >= d + y) {
+                                              const newBos = newSoru - d - y;
+                                              setGenelDenemeDersler(prev => ({
+                                                ...prev,
+                                                [ders]: { ...prev[ders], soruSayisi: val, bos: newBos }
+                                              }));
+                                            } else {
+                                              triggerShake(`genel_${ders}_soru`);
+                                            }
                                           }}
                                           style={{width: '100%', padding: '8px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
                                         />
@@ -4846,14 +4921,47 @@ const OgrenciPanel = () => {
                                         <input
                                           type="number"
                                           min="0"
+                                          max={Number(dersData.soruSayisi) || 0}
                                           value={dersData.dogru}
+                                          className={shakeFields[`genel_${ders}_dogru`] ? 'shake-animation' : ''}
                                           onChange={(e) => {
                                             const val = e.target.value;
+                                            const numVal = Number(val) || 0;
+                                            const metaForSoru = findSubjectMetaByName(ders);
+                                            const soruRaw = dersData.soruSayisi || (metaForSoru && metaForSoru.soru_sayisi);
+                                            const soru = Number(soruRaw) || 0;
                                             const yanlis = genelDenemeDersler[ders]?.yanlis || 0;
+                                            const bos = genelDenemeDersler[ders]?.bos || 0;
+                                            
+                                            if (soru > 0) {
+                                              if (numVal > soru) {
+                                                triggerShake(`genel_${ders}_dogru`);
+                                                return;
+                                              }
+                                              if (numVal + (Number(yanlis)||0) > soru) {
+                                                triggerShake(`genel_${ders}_dogru`);
+                                                return;
+                                              }
+                                            }
+
                                             const net = val && yanlis !== '' ? (Number(val) - (Number(yanlis) * 0.25)).toFixed(2) : '0.00';
+                                            
+                                            // Auto-calculate 'bos'
+                                            let newBos = bos;
+                                            if (soru > 0) {
+                                              const d = numVal;
+                                              const y = Number(yanlis) || 0;
+                                              if (d + y <= soru) {
+                                                newBos = soru - d - y;
+                                              } else {
+                                                triggerShake(`genel_${ders}_dogru`);
+                                                return;
+                                              }
+                                            }
+                                            
                                             setGenelDenemeDersler(prev => ({
                                               ...prev,
-                                              [ders]: { ...prev[ders], dogru: val, net: parseFloat(net) }
+                                              [ders]: { ...prev[ders], dogru: val, net: parseFloat(net), bos: newBos }
                                             }));
                                           }}
                                           style={{width: '100%', padding: '8px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
@@ -4864,14 +4972,47 @@ const OgrenciPanel = () => {
                                         <input
                                           type="number"
                                           min="0"
+                                          max={Number(dersData.soruSayisi) || 0}
                                           value={dersData.yanlis}
+                                          className={shakeFields[`genel_${ders}_yanlis`] ? 'shake-animation' : ''}
                                           onChange={(e) => {
                                             const val = e.target.value;
+                                            const numVal = Number(val) || 0;
+                                            const metaForSoru2 = findSubjectMetaByName(ders);
+                                            const soruRaw2 = dersData.soruSayisi || (metaForSoru2 && metaForSoru2.soru_sayisi);
+                                            const soru = Number(soruRaw2) || 0;
                                             const dogru = genelDenemeDersler[ders]?.dogru || 0;
+                                            const bos = genelDenemeDersler[ders]?.bos || 0;
+
+                                            if (soru > 0) {
+                                              if (numVal > soru) {
+                                                triggerShake(`genel_${ders}_yanlis`);
+                                                return;
+                                              }
+                                              if (numVal + (Number(dogru)||0) > soru) {
+                                                triggerShake(`genel_${ders}_yanlis`);
+                                                return;
+                                              }
+                                            }
+
                                             const net = dogru && val !== '' ? (Number(dogru) - (Number(val) * 0.25)).toFixed(2) : '0.00';
+                                            
+                                            // Auto-calculate 'bos'
+                                            let newBos = bos;
+                                            if (soru > 0) {
+                                              const d = Number(dogru) || 0;
+                                              const y = numVal;
+                                              if (d + y <= soru) {
+                                                newBos = soru - d - y;
+                                              } else {
+                                                triggerShake(`genel_${ders}_yanlis`);
+                                                return;
+                                              }
+                                            }
+
                                             setGenelDenemeDersler(prev => ({
                                               ...prev,
-                                              [ders]: { ...prev[ders], yanlis: val, net: parseFloat(net) }
+                                              [ders]: { ...prev[ders], yanlis: val, net: parseFloat(net), bos: newBos }
                                             }));
                                           }}
                                           style={{width: '100%', padding: '8px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
@@ -4882,12 +5023,37 @@ const OgrenciPanel = () => {
                                         <input
                                           type="number"
                                           min="0"
+                                          max={Number(dersData.soruSayisi) || 0}
                                           value={dersData.bos}
+                                          className={shakeFields[`genel_${ders}_bos`] ? 'shake-animation' : ''}
                                           onChange={(e) => {
                                             const val = e.target.value;
+                                            const numVal = Number(val) || 0;
+                                            const metaForSoru3 = findSubjectMetaByName(ders);
+                                            const soruRaw3 = dersData.soruSayisi || (metaForSoru3 && metaForSoru3.soru_sayisi);
+                                            const soru = Number(soruRaw3) || 0;
+                                            const dogru = genelDenemeDersler[ders]?.dogru || 0;
+                                            const yanlis = genelDenemeDersler[ders]?.yanlis || 0;
+
+                                            if (soru > 0) {
+                                              if (numVal > soru) {
+                                                triggerShake(`genel_${ders}_bos`);
+                                                return;
+                                              }
+                                              if (numVal + (Number(dogru)||0) + (Number(yanlis)||0) > soru) {
+                                                triggerShake(`genel_${ders}_bos`);
+                                                return;
+                                              }
+                                            }
+
+                                            let newBos = numVal;
+                                            if (soru > 0) {
+                                              const desiredBos = soru - (Number(dogru)||0) - (Number(yanlis)||0);
+                                              newBos = desiredBos >= 0 ? desiredBos : 0;
+                                            }
                                             setGenelDenemeDersler(prev => ({
                                               ...prev,
-                                              [ders]: { ...prev[ders], bos: val }
+                                              [ders]: { ...prev[ders], bos: newBos }
                                             }));
                                           }}
                                           style={{width: '100%', padding: '8px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14}}
