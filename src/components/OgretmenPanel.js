@@ -298,6 +298,7 @@ const MEETING_DAY_OPTIONS = [
   const [studentsLoading, setStudentsLoading] = useState(true);
   const [availableExams, setAvailableExams] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [topicSortOption, setTopicSortOption] = useState('basariDesc');
 
   // Shake animation state
   const [shakeFields, setShakeFields] = useState({});
@@ -4510,12 +4511,58 @@ const MEETING_DAY_OPTIONS = [
                               })}
                             </select>
                           </div>
+
+                          <div style={{flex: '1 1 250px'}}>
+                            <label style={{display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: 10, color: '#374151'}}>
+                              SIRALAMA:
+                            </label>
+                            <select
+                              value={topicSortOption}
+                              onChange={(e) => setTopicSortOption(e.target.value)}
+                              disabled={!selectedSubject}
+                              style={{
+                                width: '100%',
+                                padding: '12px 16px',
+                                border: '2px solid #e5e7eb',
+                                borderRadius: 12,
+                                fontSize: '15px',
+                                fontWeight: 500,
+                                color: selectedSubject ? '#374151' : '#9ca3af',
+                                background: selectedSubject ? 'white' : '#f3f4f6',
+                                cursor: selectedSubject ? 'pointer' : 'not-allowed',
+                                transition: 'all 0.2s',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                              }}
+                            >
+                              <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
+                              <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
+                              <option value="alphabetical">Alfabetik (A-Z)</option>
+                              <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
+                            </select>
+                          </div>
                         </div>
 
                         {selectedSubject && Object.keys(topicStats).length > 0 ? (
                           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                             {Object.entries(topicStats)
-                              .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
+                              .sort((a, b) => {
+                                const [konuA, statsA] = a;
+                                const [konuB, statsB] = b;
+                                
+                                if (topicSortOption === 'basariDesc') {
+                                  return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
+                                }
+                                if (topicSortOption === 'basariAsc') {
+                                  return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
+                                }
+                                if (topicSortOption === 'alphabetical') {
+                                  return konuA.localeCompare(konuB);
+                                }
+                                if (topicSortOption === 'alphabeticalDesc') {
+                                  return konuB.localeCompare(konuA);
+                                }
+                                return 0;
+                              })
                               .map(([konu, stats]) => {
                                 const topicPercent = stats.basariYuzdesi || 0;
                                 const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -5206,6 +5253,27 @@ const MEETING_DAY_OPTIONS = [
                             {selectedDersForDetail} - Konu Detayları
                           </h3>
                     </div>
+                    <select
+                      value={topicSortOption}
+                      onChange={(e) => setTopicSortOption(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,0.3)',
+                        background: 'rgba(255,255,255,0.1)',
+                        color: 'white',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        outline: 'none',
+                        marginRight: 16
+                      }}
+                    >
+                      <option value="basariDesc" style={{color: '#333'}}>Başarı: Yüksekten Düşüğe</option>
+                      <option value="basariAsc" style={{color: '#333'}}>Başarı: Düşükten Yükseğe</option>
+                      <option value="alphabetical" style={{color: '#333'}}>Alfabetik (A-Z)</option>
+                      <option value="alphabeticalDesc" style={{color: '#333'}}>Alfabetik (Z-A)</option>
+                    </select>
                         <button
                           onClick={() => {
                             setShowDersDetailModal(false);
@@ -5248,7 +5316,24 @@ const MEETING_DAY_OPTIONS = [
                             gap: 16
                           }}>
                             {Object.entries(dersDetailTopics[selectedDersForDetail])
-                              .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
+                              .sort((a, b) => {
+                                const [konuA, statsA] = a;
+                                const [konuB, statsB] = b;
+                                
+                                if (topicSortOption === 'basariDesc') {
+                                  return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
+                                }
+                                if (topicSortOption === 'basariAsc') {
+                                  return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
+                                }
+                                if (topicSortOption === 'alphabetical') {
+                                  return konuA.localeCompare(konuB);
+                                }
+                                if (topicSortOption === 'alphabeticalDesc') {
+                                  return konuB.localeCompare(konuA);
+                                }
+                                return 0;
+                              })
                               .map(([konu, topicStats]) => {
                                 const topicPercent = topicStats.basariYuzdesi || 0;
                                 const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';

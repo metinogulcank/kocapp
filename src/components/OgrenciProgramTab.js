@@ -263,6 +263,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   const [topicAnalysisDateRange, setTopicAnalysisDateRange] = useState({ start: null, end: null });
   const [showTopicAnalysisInfo, setShowTopicAnalysisInfo] = useState(false);
   const [topicAnalysisSubject, setTopicAnalysisSubject] = useState('');
+  const [topicAnalysisSortOption, setTopicAnalysisSortOption] = useState('dynamicPercentAsc');
   const [resultPopupProgram, setResultPopupProgram] = useState(null);
   const [resultPopupInputs, setResultPopupInputs] = useState({ dogru: '', yanlis: '', bos: '' });
   const [shakeStatusProgramId, setShakeStatusProgramId] = useState(null);
@@ -783,13 +784,32 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
       return {
         topic,
+        subject: topicPrograms.length > 0 ? topicPrograms[0].ders : '',
         dynamicPercent: totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0,
         filteredPercent: filteredTotal > 0 ? Math.round((filteredCorrect / filteredTotal) * 100) : 0
       };
     });
 
-    return stats.sort((a, b) => a.dynamicPercent - b.dynamicPercent);
-  }, [studentTopics, programs, topicAnalysisSubject, topicAnalysisDateFilter, topicAnalysisDateRange]);
+    switch (topicAnalysisSortOption) {
+      case 'dynamicPercentAsc':
+        return stats.sort((a, b) => a.dynamicPercent - b.dynamicPercent);
+      case 'dynamicPercentDesc':
+        return stats.sort((a, b) => b.dynamicPercent - a.dynamicPercent);
+      case 'filteredPercentAsc':
+        return stats.sort((a, b) => a.filteredPercent - b.filteredPercent);
+      case 'filteredPercentDesc':
+        return stats.sort((a, b) => b.filteredPercent - a.filteredPercent);
+      case 'alphabetical':
+        return stats.sort((a, b) => {
+          if (a.subject && b.subject && a.subject !== b.subject) {
+            return a.subject.localeCompare(b.subject);
+          }
+          return a.topic.localeCompare(b.topic);
+        });
+      default:
+        return stats.sort((a, b) => a.dynamicPercent - b.dynamicPercent);
+    }
+  }, [studentTopics, programs, topicAnalysisSubject, topicAnalysisDateFilter, topicAnalysisDateRange, topicAnalysisSortOption]);
 
   const topicAnalysisFilterLabel = useMemo(() => {
     switch (topicAnalysisDateFilter) {
@@ -4304,7 +4324,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
               <div className="topic-analysis-filters">
                 <div className="filter-group">
-                  <label>DERS SEÇİN:</label>
+                  <label>DERS:</label>
                   <select 
                     value={topicAnalysisSubject} 
                     onChange={(e) => setTopicAnalysisSubject(e.target.value)}
@@ -4318,7 +4338,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                 </div>
 
                 <div className="filter-group">
-                  <label>TARİH FİLTRESİ:</label>
+                  <label>TARİH:</label>
                   <select 
                     value={topicAnalysisDateFilter} 
                     onChange={(e) => setTopicAnalysisDateFilter(e.target.value)}
@@ -4334,32 +4354,48 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                   </select>
                 </div>
 
-                {topicAnalysisDateFilter === 'manuel' && (
-                  <div className="filter-group date-range-group">
-                    <label>Başlangıç:</label>
-                    <input 
-                      type="date" 
-                      value={topicAnalysisDateRange.start || ''}
-                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, start: e.target.value })}
-                      className="topic-analysis-date-input"
-                    />
-                    <label>Bitiş:</label>
-                    <input 
-                      type="date" 
-                      value={topicAnalysisDateRange.end || ''}
-                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, end: e.target.value })}
-                      className="topic-analysis-date-input"
-                    />
-                  </div>
-                )}
+                <div className="filter-group">
+                  <label>SIRALAMA:</label>
+                  <select 
+                    value={topicAnalysisSortOption} 
+                    onChange={(e) => setTopicAnalysisSortOption(e.target.value)}
+                    className="topic-analysis-select"
+                  >
+                    <option value="dynamicPercentAsc">Dinamik Başarı (Artan)</option>
+                    <option value="dynamicPercentDesc">Dinamik Başarı (Azalan)</option>
+                    <option value="filteredPercentAsc">Filtreli Başarı (Artan)</option>
+                    <option value="filteredPercentDesc">Filtreli Başarı (Azalan)</option>
+                    <option value="alphabetical">Ders Sırası (A-Z)</option>
+                  </select>
+                </div>
               </div>
+
+              {topicAnalysisDateFilter === 'manuel' && (
+                <div className="topic-analysis-date-range">
+                  <label>Başlangıç:</label>
+                  <input 
+                    type="date" 
+                    value={topicAnalysisDateRange.start || ''}
+                    onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, start: e.target.value })}
+                    className="topic-analysis-date-input"
+                  />
+                  <label>Bitiş:</label>
+                  <input 
+                    type="date" 
+                    value={topicAnalysisDateRange.end || ''}
+                    onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, end: e.target.value })}
+                    className="topic-analysis-date-input"
+                  />
+                </div>
+              )}
 
               <div className="topic-analysis-table-container" style={{ position: 'relative' }}>
                 <table className="topic-analysis-table">
                   <thead>
                     <tr>
-                      <th>Konu</th>
-                      <th>
+                      {!topicAnalysisSubject && <th className="col-subject">Ders</th>}
+                      <th className="col-topic">Konu</th>
+                      <th className="col-stat">
                         <span>Dinamik %</span>
                         <button
                           type="button"
@@ -4369,13 +4405,13 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                           <FontAwesomeIcon icon={faInfoCircle} />
                         </button>
                       </th>
-                      <th>{topicAnalysisFilterLabel} %</th>
+                      <th className="col-stat">{topicAnalysisFilterLabel} %</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedTopicStats.length > 0 ? (
                       sortedTopicStats.map((stat, idx) => {
-                        const { topic, dynamicPercent, filteredPercent } = stat;
+                        const { topic, subject, dynamicPercent, filteredPercent } = stat;
                         const getPercentageClass = (percent) => {
                           if (percent < 50) return 'percent-red';
                           if (percent < 75) return 'percent-yellow';
@@ -4383,6 +4419,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                         };
                         return (
                           <tr key={idx}>
+                            {!topicAnalysisSubject && <td>{subject}</td>}
                             <td>{topic}</td>
                             <td className={`topic-percentage ${getPercentageClass(dynamicPercent)}`}>
                               {dynamicPercent}%

@@ -1857,32 +1857,40 @@
 
 .topic-analysis-filters {
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 4px;
 }
 
 .filter-group {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .filter-group label {
-  font-weight: 600;
-  font-size: 14px;
-  color: #374151;
+  font-weight: 700;
+  font-size: 10px;
+  color: #6b7280;
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .topic-analysis-select {
-  padding: 8px 12px;
+  padding: 6px 4px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  font-size: 14px;
-  min-width: 150px;
+  font-size: 11px;
+  min-width: 0;
+  width: 100%;
   background: white;
   cursor: pointer;
+  height: 32px;
 }
 
 .topic-analysis-select:focus {
@@ -1897,11 +1905,25 @@
   gap: 8px;
 }
 
+.topic-analysis-date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.topic-analysis-date-range label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
 .topic-analysis-date-input {
-  padding: 8px 12px;
+  padding: 6px 8px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .topic-analysis-table-container {
@@ -1933,18 +1955,6 @@
   border-bottom: 2px solid #e5e7eb;
 }
 
-.topic-analysis-table th:nth-child(1) {
-  text-align: left;
-}
-
-.topic-analysis-table th:nth-child(2) {
-  text-align: center;
-}
-
-.topic-analysis-table th:nth-child(3) {
-  text-align: right;
-}
-
 .topic-analysis-table td {
   padding: 12px 16px;
   font-size: 14px;
@@ -1952,16 +1962,18 @@
   border-bottom: 1px solid #f3f4f6;
 }
 
-.topic-analysis-table td:nth-child(1) {
+.topic-analysis-table .col-subject {
+  text-align: left;
+  width: 25%;
+}
+
+.topic-analysis-table .col-topic {
   text-align: left;
 }
 
-.topic-analysis-table td:nth-child(2) {
+.topic-analysis-table .col-stat {
   text-align: center;
-}
-
-.topic-analysis-table td:nth-child(3) {
-  text-align: right;
+  width: 20%;
 }
 
 .topic-analysis-table tbody tr:hover {
