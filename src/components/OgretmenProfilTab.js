@@ -13,6 +13,8 @@ const API_DELETE_STUDENT = `${API_BASE}/php-backend/api/delete_student.php`;
 const API_GET_STUDENTS = `${API_BASE}/php-backend/api/get_teacher_students.php`;
 const API_CREATE_APPT = `${API_BASE}/php-backend/api/create_appointment.php`;
 const API_GET_APPTS = `${API_BASE}/php-backend/api/get_appointments.php`;
+const API_GET_SUBSCRIPTION = `${API_BASE}/php-backend/api/get_teacher_subscription.php`;
+const API_ACCEPT_PAYMENT = `${API_BASE}/php-backend/api/accept_teacher_payment.php`;
 
 const safeFetchJson = async (url, options = {}) => {
   try {
@@ -97,6 +99,22 @@ export default function OgretmenProfilTab() {
   const [addSuccess, setAddSuccess] = useState('');
   const [stuUploading, setStuUploading] = useState(false);
   const [availableExams, setAvailableExams] = useState([]);
+  // Abonelik ve ödeme state
+  const [subscriptionDaysLeft, setSubscriptionDaysLeft] = useState(null);
+  const [subscriptionEndDate, setSubscriptionEndDate] = useState('');
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState('');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPackageId, setSelectedPackageId] = useState(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('Kredi Kartı');
+  const [purchasing, setPurchasing] = useState(false);
+  const [purchaseError, setPurchaseError] = useState('');
+  const [purchaseSuccess, setPurchaseSuccess] = useState('');
+  const packages = useMemo(() => ([
+    { id: 'starter', name: 'Başlangıç Paketi', days: 90, price: 199.99, limit: 5, description: '5 Öğrenci Kapasiteli' },
+    { id: 'pro', name: 'Orta Paket', days: 180, price: 299.99, limit: 7, description: '7 Öğrenci Kapasiteli' },
+    { id: 'ultimate', name: 'Gelişmiş Paket', days: 365, price: 399.99, limit: 10, description: '10 Öğrenci Kapasiteli' }
+  ]), []);
 
   // Sınav listesini çek
   useEffect(() => {
@@ -112,6 +130,11 @@ export default function OgretmenProfilTab() {
   // Öğrenci listesi için state
   const [showStudentListModal, setShowStudentListModal] = useState(false);
   const [students, setStudents] = useState([]);
+
+  // Update active count when students list changes
+  useEffect(() => {
+    setForm(f => ({ ...f, active: students.length }));
+  }, [students]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [showEditStudentModal, setShowEditStudentModal] = useState(false);
@@ -156,9 +179,85 @@ export default function OgretmenProfilTab() {
     fetchAppointments(user.id);
     // Öğrencileri de çek (select box için)
     fetchStudents(user.id);
+    // Abonelik bilgisini çek
+    fetchSubscription(user.id);
 
   }, []);
 
+  const fetchSubscription = async (teacherId) => {
+    if (!teacherId) return;
+    setSubscriptionLoading(true);
+    setSubscriptionError('');
+    try {
+      const data = await safeFetchJson(`${API_GET_SUBSCRIPTION}?teacherId=${teacherId}`);
+      if (data && data.success) {
+        setSubscriptionDaysLeft(typeof data.daysLeft === 'number' ? data.daysLeft : null);
+        setSubscriptionEndDate(data.endDate || '');
+        if (typeof data.studentLimit === 'number') {
+          setForm(f => ({ ...f, limit: data.studentLimit }));
+        }
+      } else {
+        setSubscriptionError(data?.message || 'Abonelik bilgisi alınamadı');
+        setSubscriptionDaysLeft(null);
+      }
+    } catch (e) {
+      setSubscriptionError('Abonelik bilgisi alınamadı');
+      setSubscriptionDaysLeft(null);
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  };
+
+  const handleOpenPayment = () => {
+    setSelectedPackageId(packages[0]?.id || null);
+    setSelectedPaymentMethod('Kredi Kartı');
+    setPurchaseError('');
+    setPurchaseSuccess('');
+    setShowPaymentModal(true);
+  };
+
+  const handleConfirmPurchase = async () => {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user?.id) return;
+    const pkg = packages.find(p => p.id === selectedPackageId);
+    if (!pkg) {
+      setPurchaseError('Lütfen bir paket seçin');
+      return;
+    }
+    setPurchasing(true);
+    setPurchaseError('');
+    setPurchaseSuccess('');
+    try {
+      const payload = {
+        teacherId: user.id,
+        amount: pkg.price,
+        method: selectedPaymentMethod,
+        packageId: pkg.id,
+        durationDays: pkg.days,
+        studentLimit: pkg.limit,
+        description: `Öğretmen paketi: ${pkg.name}`
+      };
+      const data = await safeFetchJson(API_ACCEPT_PAYMENT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!data.success) {
+        setPurchaseError(data.message || 'Ödeme başarısız');
+      } else {
+        setPurchaseSuccess('Ödeme alındı. Abonelik güncellendi.');
+        await fetchSubscription(user.id);
+        setTimeout(() => {
+          setShowPaymentModal(false);
+          setPurchaseSuccess('');
+        }, 1200);
+      }
+    } catch (e) {
+      setPurchaseError('Ödeme alınamadı');
+    } finally {
+      setPurchasing(false);
+    }
+  };
   const fetchAppointments = async (teacherId) => {
     const tid = teacherId || (JSON.parse(localStorage.getItem('user'))?.id);
     if(!tid) return;
@@ -574,7 +673,16 @@ export default function OgretmenProfilTab() {
       <div className="dashboard-tiles">
         <div className="tile">
           <div className="tile-title">Abonelik bitiş süresi</div>
-          <div className="tile-value large">90</div>
+          <div className="tile-value large">
+            {subscriptionLoading ? '...' : (subscriptionDaysLeft ?? '—')}
+          </div>
+          <div className="tile-sub">
+            {subscriptionEndDate ? `Bitiş: ${new Date(subscriptionEndDate).toLocaleDateString('tr-TR')}` : 'Bitiş tarihi alınamadı'}
+          </div>
+          <div style={{marginTop: 8}}>
+            <button className="edit-btn" onClick={handleOpenPayment}>Aboneliği Uzat / Satın Al</button>
+          </div>
+          {subscriptionError && <div style={{color:'#b91c1c', marginTop:6}}>{subscriptionError}</div>}
         </div>
         <div className="tile">
           <div className="tile-title">Öğrenci sayısı</div>
@@ -586,7 +694,7 @@ export default function OgretmenProfilTab() {
             <div className="tile-icon">🗓️</div>
         </div>
         <div className="tile" onClick={handleOpenStudentList} style={{cursor: 'pointer'}}><div className="tile-title">Öğrencileri listele</div><div className="tile-icon">📋</div></div>
-        <div className="tile add" onClick={() => setShowAddStudentModal(true)}>
+        <div className="tile add" onClick={() => setShowAddStudentModal(true)} style={{cursor: 'pointer'}}>
           <div className="tile-title green">Yeni öğrenci ekle</div>
           <div className="tile-icon">➕</div>
         </div>
@@ -775,6 +883,64 @@ export default function OgretmenProfilTab() {
                 <button type="submit" className="edit-btn" disabled={adding}>{adding ? 'Kaydediliyor...' : 'Kaydet'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Ödeme/Paket seçimi modalı */}
+      {showPaymentModal && (
+        <div className="profile-modal-bg" onClick={() => setShowPaymentModal(false)}>
+          <div className="profile-modal" onClick={e=>e.stopPropagation()} style={{maxWidth: 700}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 16}}>
+              <h2 style={{margin:0}}>Paket Seçimi ve Ödeme</h2>
+              <button onClick={() => setShowPaymentModal(false)} style={{background:'none', border:'none', cursor:'pointer'}}>
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            </div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12}}>
+              {packages.map(pkg => (
+                <button
+                  key={pkg.id}
+                  onClick={()=>setSelectedPackageId(pkg.id)}
+                  className="edit-btn ghost"
+                  style={{
+                    padding: 16,
+                    border: selectedPackageId === pkg.id ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                    borderRadius: 10,
+                    textAlign: 'left',
+                    background: '#fff',
+                    color: '#111827',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{fontWeight: 700, fontSize: 16, marginBottom: 6}}>{pkg.name}</div>
+                  <div style={{color:'#374151', fontSize: 14, marginBottom: 6}}>{pkg.description}</div>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                    <span style={{color:'#6b7280'}}>Süre: {pkg.days} gün</span>
+                    <span style={{fontWeight:700, color:'#059669'}}>{pkg.price.toFixed(2)} ₺</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div style={{marginTop: 16}}>
+              <label style={{display:'block', marginBottom: 6}}>Ödeme Yöntemi</label>
+              <select
+                value={selectedPaymentMethod}
+                onChange={(e)=>setSelectedPaymentMethod(e.target.value)}
+                style={{width:'100%', padding:10, borderRadius:8, border:'1px solid #d1d5db'}}
+              >
+                <option value="Kredi Kartı">Kredi Kartı</option>
+                <option value="Havale/EFT">Havale/EFT</option>
+              </select>
+            </div>
+            {purchaseError && <div style={{color:'#b91c1c', marginTop:10}}>{purchaseError}</div>}
+            {purchaseSuccess && <div style={{color:'#16a34a', marginTop:10}}>{purchaseSuccess}</div>}
+            <div style={{display:'flex', justifyContent:'flex-end', marginTop:16}}>
+              <button className="edit-btn ghost" style={{marginRight:10}} onClick={()=>setShowPaymentModal(false)}>Vazgeç</button>
+              <button className="edit-btn" onClick={handleConfirmPurchase} disabled={purchasing}>
+                {purchasing ? 'İşlem yapılıyor...' : 'Satın Al'}
+              </button>
+            </div>
           </div>
         </div>
       )}

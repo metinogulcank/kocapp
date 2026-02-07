@@ -108,10 +108,10 @@ try {
 
     if ($idCol && $hasJson) {
         if ($altIdCol) {
-            $stmtUser = $db->prepare("SELECT konular_json FROM ogrenci_konu_ilerlemesi WHERE ($idCol = ? OR $altIdCol = ?) AND ders = ? LIMIT 1");
+            $stmtUser = $db->prepare("SELECT konular_json FROM ogrenci_konu_ilerlemesi WHERE ($idCol = ? OR $altIdCol = ?) AND ders = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1");
             $stmtUser->execute([$studentId, $studentId, $ders]);
         } else {
-            $stmtUser = $db->prepare("SELECT konular_json FROM ogrenci_konu_ilerlemesi WHERE $idCol = ? AND ders = ? LIMIT 1");
+            $stmtUser = $db->prepare("SELECT konular_json FROM ogrenci_konu_ilerlemesi WHERE $idCol = ? AND ders = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1");
             $stmtUser->execute([$studentId, $ders]);
         }
         $json = $stmtUser->fetchColumn();
@@ -123,7 +123,8 @@ try {
                         $userTopicsMap[$uTopic['id']] = $uTopic;
                     }
                     if (isset($uTopic['konu'])) {
-                        $normalizedName = mb_strtolower(trim(preg_replace('/^[\d]+\.\s*/', '', $uTopic['konu'])), 'UTF-8');
+                        // Başta numara, nokta, tire ve boşlukları temizle; küçük harfe çevir
+                        $normalizedName = mb_strtolower(trim(preg_replace('/^[\d\.\-\s]+/', '', $uTopic['konu'])), 'UTF-8');
                         $userTopicsMapByName[$normalizedName] = $uTopic;
                     }
                 }
@@ -139,7 +140,8 @@ try {
         $i++;
         $mId = $master['id'];
         $mName = $master['konu_adi'];
-        $normalizedMName = mb_strtolower(trim($mName), 'UTF-8');
+        // Master isim için de aynı normalizasyonu uygula
+        $normalizedMName = mb_strtolower(trim(preg_replace('/^[\d\.\-\s]+/', '', $mName)), 'UTF-8');
 
         // Kullanıcı verisini bulmaya çalış (Önce ID, sonra İsim)
         $userData = null;

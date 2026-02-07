@@ -6,6 +6,9 @@ header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json; charset=UTF-8');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header("Cache-Control: no-cache, no-store, must-revalidate");
+header("Pragma: no-cache");
+header("Expires: 0");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -47,10 +50,10 @@ try {
         if ($includeSubtopics) {
             $query = "
                 SELECT 
-                    id, 
-                    ders_id, 
-                    parent_id, 
-                    konu_adi, 
+                    id COLLATE utf8mb4_unicode_ci AS id, 
+                    ders_id COLLATE utf8mb4_unicode_ci AS ders_id, 
+                    parent_id COLLATE utf8mb4_unicode_ci AS parent_id, 
+                    konu_adi COLLATE utf8mb4_unicode_ci AS konu_adi, 
                     sira, 
                     createdAt, 
                     updatedAt 
@@ -59,15 +62,15 @@ try {
                   AND (parent_id IS NULL OR parent_id = '')
                 UNION ALL
                 SELECT 
-                    sa.id, 
-                    sk.ders_id, 
-                    sa.konu_id AS parent_id, 
-                    sa.alt_konu_adi AS konu_adi, 
+                    sa.id COLLATE utf8mb4_unicode_ci AS id, 
+                    sk.ders_id COLLATE utf8mb4_unicode_ci AS ders_id, 
+                    sa.konu_id COLLATE utf8mb4_unicode_ci AS parent_id, 
+                    sa.alt_konu_adi COLLATE utf8mb4_unicode_ci AS konu_adi, 
                     sa.sira, 
                     sa.createdAt, 
                     sa.updatedAt 
                 FROM sinav_alt_konulari sa
-                JOIN sinav_konulari sk ON sa.konu_id = sk.id
+                JOIN sinav_konulari sk ON sa.konu_id COLLATE utf8mb4_unicode_ci = sk.id COLLATE utf8mb4_unicode_ci
                 WHERE sk.ders_id = ?
                 ORDER BY sira ASC, konu_adi ASC
             ";
@@ -76,10 +79,10 @@ try {
         } else {
             $stmt = $db->prepare("
                 SELECT 
-                    id, 
-                    ders_id, 
-                    parent_id, 
-                    konu_adi, 
+                    id COLLATE utf8mb4_unicode_ci AS id, 
+                    ders_id COLLATE utf8mb4_unicode_ci AS ders_id, 
+                    parent_id COLLATE utf8mb4_unicode_ci AS parent_id, 
+                    konu_adi COLLATE utf8mb4_unicode_ci AS konu_adi, 
                     sira, 
                     createdAt, 
                     updatedAt 

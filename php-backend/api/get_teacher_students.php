@@ -20,6 +20,12 @@ require_once '../config/database.php';
 $database = new Database();
 $db = $database->getConnection();
 
+if (!$db) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Veritabanı bağlantı hatası']);
+    exit;
+}
+
 // TeacherId parametresini al
 $teacherId = isset($_GET['teacherId']) ? $_GET['teacherId'] : null;
 

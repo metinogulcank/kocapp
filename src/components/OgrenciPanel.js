@@ -278,7 +278,6 @@ const OgrenciPanel = () => {
   const [showDersDetailModal, setShowDersDetailModal] = useState(false);
   const [dersDetailTopics, setDersDetailTopics] = useState({});
   const [dersBasariExamType, setDersBasariExamType] = useState('tyt');
-  const [topicSortOption, setTopicSortOption] = useState('basariDesc');
 
   // Profil formu (öğrenci kendi bilgilerini düzenler)
   const [profileForm, setProfileForm] = useState({
@@ -3139,34 +3138,13 @@ const OgrenciPanel = () => {
                         >
                           ← Ders Değiştir
                         </button>
-                        <div style={{flex: 1}}>
+                        <div>
                           <h3 style={{fontSize: '22px', fontWeight: 700, color: '#1f2937', margin: 0}}>
                             {selectedSubject}
                           </h3>
                           <p style={{fontSize: '14px', color: '#6b7280', margin: 0}}>
                             Konu bazlı başarı dağılımı
                           </p>
-                        </div>
-                        <div>
-                          <select
-                            value={topicSortOption}
-                            onChange={(e) => setTopicSortOption(e.target.value)}
-                            style={{
-                              padding: '10px 16px',
-                              borderRadius: 10,
-                              border: '1px solid #e5e7eb',
-                              background: 'white',
-                              color: '#374151',
-                              fontSize: '14px',
-                              cursor: 'pointer',
-                              outline: 'none'
-                            }}
-                          >
-                            <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
-                            <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
-                            <option value="alphabetical">Alfabetik (A-Z)</option>
-                            <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
-                          </select>
                         </div>
                       </div>
 
@@ -3178,24 +3156,7 @@ const OgrenciPanel = () => {
                       ) : (
                         <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                           {Object.entries(topicStats)
-                            .sort((a, b) => {
-                              const [konuA, statsA] = a;
-                              const [konuB, statsB] = b;
-                              
-                              if (topicSortOption === 'basariDesc') {
-                                return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                              }
-                              if (topicSortOption === 'basariAsc') {
-                                return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                              }
-                              if (topicSortOption === 'alphabetical') {
-                                return konuA.localeCompare(konuB);
-                              }
-                              if (topicSortOption === 'alphabeticalDesc') {
-                                return konuB.localeCompare(konuA);
-                              }
-                              return 0;
-                            })
+                            .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                             .map(([konu, stats]) => {
                               const topicPercent = stats.basariYuzdesi || 0;
                               const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -3830,7 +3791,7 @@ const OgrenciPanel = () => {
                       justifyContent: 'space-between',
                       gap: 12
                     }}>
-                      <div style={{flex: 1}}>
+                      <div>
                         <h3 style={{margin: 0, fontSize: 20, fontWeight: 700, color: '#111827'}}>
                           {selectedDersForDetail} - Konu Detayları
                         </h3>
@@ -3838,26 +3799,6 @@ const OgrenciPanel = () => {
                           Bu derse ait programlanan konuların performans dağılımı
                         </p>
                       </div>
-                      <select
-                        value={topicSortOption}
-                        onChange={(e) => setTopicSortOption(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 10,
-                          border: '1px solid #e5e7eb',
-                          background: 'white',
-                          color: '#374151',
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
-                        <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
-                        <option value="alphabetical">Alfabetik (A-Z)</option>
-                        <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
-                      </select>
                       <button
                         onClick={() => {
                           setShowDersDetailModal(false);
@@ -3891,24 +3832,7 @@ const OgrenciPanel = () => {
                           gap: 16
                         }}>
                           {Object.entries(dersDetailTopics[selectedDersForDetail])
-                            .sort((a, b) => {
-                              const [konuA, statsA] = a;
-                              const [konuB, statsB] = b;
-                              
-                              if (topicSortOption === 'basariDesc') {
-                                return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                              }
-                              if (topicSortOption === 'basariAsc') {
-                                return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                              }
-                              if (topicSortOption === 'alphabetical') {
-                                return konuA.localeCompare(konuB);
-                              }
-                              if (topicSortOption === 'alphabeticalDesc') {
-                                return konuB.localeCompare(konuA);
-                              }
-                              return 0;
-                            })
+                            .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                             .map(([konu, topicStats]) => {
                               const topicPercent = topicStats.basariYuzdesi || 0;
                               const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';

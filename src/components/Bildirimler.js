@@ -4,7 +4,7 @@ import { faTrash, faCheckDouble } from '@fortawesome/free-solid-svg-icons';
 import './Bildirimler.css';
 import BildirimDetay from './BildirimDetay';
 
-const Bildirimler = ({ students = [], filter = null, title = 'Bildirimlerim', userRole = null }) => {
+const Bildirimler = ({ students = [], filter = null, title = 'Bildirimlerim', userRole = null, initialSelectedStudentId = null }) => {
   // Proxy kullan - localhost'ta çalışırken CORS sorunu olmaz
   const API_BASE = process.env.REACT_APP_API_URL || (window.location.hostname === 'localhost' ? 'https://kocapp.com' : window.location.origin);
   const [activeTab, setActiveTab] = useState('ogrenci');
@@ -63,6 +63,14 @@ const Bildirimler = ({ students = [], filter = null, title = 'Bildirimlerim', us
   useEffect(() => {
     fetchTemplates();
   }, []);
+
+  useEffect(() => {
+    if (initialSelectedStudentId) {
+        setRecipientType('student');
+        setSelectedStudents([initialSelectedStudentId]);
+        setActiveTab('ogrenci');
+    }
+  }, [initialSelectedStudentId]);
 
   const handleSaveTemplate = async () => {
     if (!newTemplateName.trim() || !newTemplateContent.trim()) {

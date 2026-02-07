@@ -247,6 +247,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
   const [teacherAnalysisMessage, setTeacherAnalysisMessage] = useState('');
   const [teacherAnalysisMessageType, setTeacherAnalysisMessageType] = useState('success');
   const [aiAnalysis, setAiAnalysis] = useState('');
+  const [aiAnalysisGenerating, setAiAnalysisGenerating] = useState(false);
+  const [aiAnalysisMessage, setAiAnalysisMessage] = useState('');
+  const [aiAnalysisMessageType, setAiAnalysisMessageType] = useState('success');
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
@@ -603,10 +606,85 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
     setIsKonuLoading(true);
     try {
-      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}`);
-      if (data.success) {
-        setDynamicTopics(data.topics || []);
+      // 1. Admin Panelindeki sıralı listeyi çek (MASTER LIST)
+      const adminData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}&_t=${Date.now()}`);
+      let adminTopics = [];
+      if (adminData.success && Array.isArray(adminData.topics)) {
+        adminTopics = adminData.topics;
       }
+
+      // 2. Öğretmenin kaydettiği durumları çek (STATUS SOURCE)
+      const studentId = student?.id || student?.studentId;
+      let savedTopicsMap = new Map();
+      let extraSavedTopics = [];
+
+      if (studentId) {
+        try {
+          const progressData = await safeFetchJson(`${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentId}&ders=${encodeURIComponent(subject.ders_adi)}`);
+          if (progressData.success && Array.isArray(progressData.konular)) {
+             const normalizeKey = (v) => (v || '').replace(/^[\d\.\-\s]+/, '').trim().toLocaleLowerCase('tr-TR');
+             progressData.konular.forEach(t => {
+                savedTopicsMap.set(normalizeKey(t.konu), t);
+             });
+             // Admin listesinde olmayan ama kaydedilmiş (custom) konuları bul
+             const adminKeys = new Set(adminTopics.map(at => normalizeKey(at.konu_adi)));
+             progressData.konular.forEach(t => {
+                const key = normalizeKey(t.konu);
+                if (!adminKeys.has(key)) {
+                    extraSavedTopics.push(t);
+                }
+             });
+          }
+        } catch (e) {
+          console.warn('Konu ilerlemesi çekilemedi', e);
+        }
+      }
+
+      // 3. Listeyi oluştur: öğretmenin sırası varsa onu tercih et, yoksa Admin sırası
+      let finalTopics = [];
+
+      if (adminTopics.length > 0) {
+        // Admin topics listesini sira'ya göre sırala (garanti olsun)
+        adminTopics.sort((a, b) => (Number(a.sira) || 0) - (Number(b.sira) || 0));
+        
+        finalTopics = adminTopics.map((adminTopic, index) => {
+            const normalizeKey = (v) => (v || '').replace(/^[\d\.\-\s]+/, '').trim().toLocaleLowerCase('tr-TR');
+            const key = normalizeKey(adminTopic.konu_adi || '');
+            const saved = savedTopicsMap.get(key);
+            
+            return {
+                id: adminTopic.id, // Admin ID
+                konu_adi: adminTopic.konu_adi,
+                durum: saved ? saved.durum : 'Konuya Gelinmedi',
+                // Öğretmen sırası varsa onu kullan, yoksa Admin sırası veya index
+                sira: saved && saved.sira != null ? Number(saved.sira) : ((adminTopic.sira != null ? Number(adminTopic.sira) : (index + 1)))
+            };
+        });
+        // Öğretmen sırasına göre son sıralama
+        finalTopics.sort((a, b) => (Number(a.sira) || 0) - (Number(b.sira) || 0));
+      } else if (savedTopicsMap.size > 0) {
+        // Admin listesi boşsa ama kayıtlı veriler varsa onları kullan
+        finalTopics = Array.from(savedTopicsMap.values()).map(t => ({
+            id: t.id,
+            konu_adi: t.konu,
+            durum: t.durum,
+            sira: Number(t.sira)
+        })).sort((a, b) => Number(a.sira) - Number(b.sira));
+      }
+
+      // 4. Extra (Admin'de olmayan ama DB'de olan) konuları sona ekle
+      if (extraSavedTopics.length > 0) {
+        const mappedExtras = extraSavedTopics.map((t, idx) => ({
+             id: t.id,
+             konu_adi: t.konu,
+             durum: t.durum,
+             sira: (t.sira != null ? Number(t.sira) : (finalTopics.length + idx + 1))
+        }));
+        finalTopics = [...finalTopics, ...mappedExtras].sort((a, b) => (Number(a.sira) || 0) - (Number(b.sira) || 0));
+      }
+
+      setDynamicTopics(finalTopics);
+
     } catch (error) {
       console.error('Konular yüklenemedi:', error);
     } finally {
@@ -2154,6 +2232,35 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
     }
   };
 
+  const handleGenerateAiAnalysis = async () => {
+    if (!student?.id || !teacherId || !weekStartIso) return;
+    setAiAnalysisGenerating(true);
+    setAiAnalysisMessage('');
+    setAiAnalysisMessageType('success');
+    try {
+      const data = await safeFetchJson(
+        `${API_BASE}/php-backend/api/generate_student_ai_analysis.php?studentId=${student.id}&teacherId=${teacherId}&weekStart=${weekStartIso}`
+      );
+      if (data.success) {
+        setAiAnalysis(data.aiComment || '');
+        setAiAnalysisMessage('AI analiz oluşturuldu.');
+        setAiAnalysisMessageType('success');
+      } else {
+        setAiAnalysisMessage(data.message || 'AI analiz oluşturulamadı.');
+        setAiAnalysisMessageType('error');
+      }
+    } catch (error) {
+      setAiAnalysisMessage('AI analiz oluşturulamadı.');
+      setAiAnalysisMessageType('error');
+    } finally {
+      setAiAnalysisGenerating(false);
+      setTimeout(() => {
+        setAiAnalysisMessage('');
+        setAiAnalysisMessageType('success');
+      }, 4000);
+    }
+  };
+
   const handleOpenAiAnalysis = () => {
     if (!student) return;
 
@@ -3230,7 +3337,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                     >
                                       <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
                                       {dynamicTopics.map((topic, index) => (
-                                        <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                                        <option key={index} value={topic.konu_adi}>
+                                          {topic.konu_adi} {topic.durum === 'Çalıştım' ? '✓' : ''}
+                                        </option>
                                       ))}
                                       {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
                                     </select>
@@ -3709,7 +3818,9 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                                   >
                                     <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
                                     {dynamicTopics.map((topic, index) => (
-                                      <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                                      <option key={index} value={topic.konu_adi}>
+                                        {topic.konu_adi} {topic.durum === 'Çalıştım' ? '✓' : ''}
+                                      </option>
                                     ))}
                                     {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
                                   </select>
@@ -3900,8 +4011,16 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
         <div className="analysis-card ai-analysis-card" ref={aiAnalysisRef}>
           <div className="analysis-card-header">
             <h3>AI Analiz Yorumu</h3>
+            <button
+              type="button"
+              className="save-btn"
+              onClick={handleGenerateAiAnalysis}
+              disabled={aiAnalysisGenerating || analysisLoading}
+            >
+              {aiAnalysisGenerating ? 'Oluşturuluyor...' : 'AI Analizi Oluştur'}
+            </button>
                 </div>
-          <div className="ai-analysis-placeholder">
+          <div className="ai-analysis-placeholder" style={{ whiteSpace: 'pre-line' }}>
             {aiAnalysis
               ? aiAnalysis
               : 'AI destekli analiz yorumları yakında burada görünecek.'}
@@ -3914,6 +4033,11 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
             >
               Haftalık Analizi Veliye Gönder
             </button>
+            {aiAnalysisMessage && (
+              <span className={`analysis-message ${aiAnalysisMessageType === 'error' ? 'error' : 'success'}`}>
+                {aiAnalysisMessage}
+              </span>
+            )}
                 </div>
               </div>
       </div>
@@ -4324,7 +4448,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
 
               <div className="topic-analysis-filters">
                 <div className="filter-group">
-                  <label>DERS:</label>
+                  <label>DERS SEÇİN:</label>
                   <select 
                     value={topicAnalysisSubject} 
                     onChange={(e) => setTopicAnalysisSubject(e.target.value)}
@@ -4338,7 +4462,7 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                 </div>
 
                 <div className="filter-group">
-                  <label>TARİH:</label>
+                  <label>TARİH FİLTRESİ:</label>
                   <select 
                     value={topicAnalysisDateFilter} 
                     onChange={(e) => setTopicAnalysisDateFilter(e.target.value)}
@@ -4368,26 +4492,26 @@ const OgrenciProgramTab = ({ student, teacherId, isStudentPanel = false, readOnl
                     <option value="alphabetical">Ders Sırası (A-Z)</option>
                   </select>
                 </div>
-              </div>
 
-              {topicAnalysisDateFilter === 'manuel' && (
-                <div className="topic-analysis-date-range">
-                  <label>Başlangıç:</label>
-                  <input 
-                    type="date" 
-                    value={topicAnalysisDateRange.start || ''}
-                    onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, start: e.target.value })}
-                    className="topic-analysis-date-input"
-                  />
-                  <label>Bitiş:</label>
-                  <input 
-                    type="date" 
-                    value={topicAnalysisDateRange.end || ''}
-                    onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, end: e.target.value })}
-                    className="topic-analysis-date-input"
-                  />
-                </div>
-              )}
+                {topicAnalysisDateFilter === 'manuel' && (
+                  <div className="filter-group date-range-group">
+                    <label>Başlangıç:</label>
+                    <input 
+                      type="date" 
+                      value={topicAnalysisDateRange.start || ''}
+                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, start: e.target.value })}
+                      className="topic-analysis-date-input"
+                    />
+                    <label>Bitiş:</label>
+                    <input 
+                      type="date" 
+                      value={topicAnalysisDateRange.end || ''}
+                      onChange={(e) => setTopicAnalysisDateRange({ ...topicAnalysisDateRange, end: e.target.value })}
+                      className="topic-analysis-date-input"
+                    />
+                  </div>
+                )}
+              </div>
 
               <div className="topic-analysis-table-container" style={{ position: 'relative' }}>
                 <table className="topic-analysis-table">
@@ -4981,7 +5105,9 @@ const TemplateCreatorModal = ({ teacherId, onClose, onSave, templateToEdit }) =>
                       >
                         <option value="">{isKonuLoading ? 'Yükleniyor...' : 'Konu Seçiniz'}</option>
                         {dynamicTopics.map((topic, index) => (
-                          <option key={index} value={topic.konu_adi}>{topic.konu_adi}</option>
+                          <option key={index} value={topic.konu_adi}>
+                            {topic.konu_adi} {topic.durum === 'Çalıştım' ? '✓' : ''}
+                          </option>
                         ))}
                         {!isKonuLoading && <option value="other">Diğer (Manuel Gir)</option>}
                       </select>

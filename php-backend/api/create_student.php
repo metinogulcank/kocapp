@@ -46,6 +46,22 @@ if ($stmt->fetchColumn()) {
     exit;
 }
 
+// Öğrenci limiti kontrolü
+$limitStmt = $db->prepare("SELECT student_limit FROM teacher_subscriptions WHERE teacher_id = ? LIMIT 1");
+$limitStmt->execute([$data->teacherId]);
+$limitRow = $limitStmt->fetch(PDO::FETCH_ASSOC);
+$studentLimit = ($limitRow && isset($limitRow['student_limit'])) ? intval($limitRow['student_limit']) : 5;
+
+$countStmt = $db->prepare("SELECT COUNT(*) FROM ogrenciler WHERE teacherId = ?");
+$countStmt->execute([$data->teacherId]);
+$currentCount = $countStmt->fetchColumn();
+
+if ($currentCount >= $studentLimit) {
+    http_response_code(403);
+    echo json_encode(['message' => "Öğrenci limitiniz doldu! ($currentCount/$studentLimit). Lütfen paketinizi yükseltin."]);
+    exit;
+}
+
 $id = generateRandomId();
 $firstName = $data->firstName;
 $lastName = $data->lastName;

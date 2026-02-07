@@ -1,9 +1,10 @@
 
 import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChalkboardTeacher, faGaugeHigh, faUserGraduate, faUserTie, faChartBar, faUsers, faUserShield, faChartLine, faCalendarAlt, faList, faUserClock, faLayerGroup, faPlus, faTrash, faEdit, faTimes, faImage, faTint } from '@fortawesome/free-solid-svg-icons';
+import { faChalkboardTeacher, faGaugeHigh, faUserGraduate, faUserTie, faChartBar, faUsers, faUserShield, faChartLine, faCalendarAlt, faList, faUserClock, faLayerGroup, faPlus, faTrash, faEdit, faTimes, faImage, faTint, faMoneyBill } from '@fortawesome/free-solid-svg-icons';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import AdminMuhasebeTab from './AdminMuhasebeTab';
 
 const fetchApi = async (url, options = {}) => {
   try {
@@ -27,11 +28,10 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
   const navItems = [
     { key: 'dashboard', icon: faGaugeHigh, label: 'Genel Bakış' },
     { key: 'users', icon: faUsers, label: 'Kullanıcılar' },
+    { key: 'muhasebe', icon: faMoneyBill, label: 'Muhasebe' },
     { key: 'exam-management', icon: faLayerGroup, label: 'Sınavlar/Dersler/Konular' },
     { key: 'ders-detay', icon: faChalkboardTeacher, label: 'Ders Detay' },
     { key: 'course-style', icon: faEdit, label: 'Ders Yönetimi' },
-    { key: 'students', icon: faUserGraduate, label: 'Öğrenciler' },
-    { key: 'teachers', icon: faUserTie, label: 'Öğretmenler' },
     { key: 'reports', icon: faChartBar, label: 'Raporlar' },
   ];
 
@@ -548,6 +548,7 @@ const DersDetayTab = () => {
   const [selectedExam, setSelectedExam] = useState(null);
   const [components, setComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
+  const [selectedSubComponent, setSelectedSubComponent] = useState(null);
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -558,6 +559,20 @@ const DersDetayTab = () => {
   const [editingResource, setEditingResource] = useState(null);
   const [isResourceEditorOpen, setIsResourceEditorOpen] = useState(false);
   const resourceInputRef = useRef(null);
+
+  const rootComponents = useMemo(() => {
+    const tops = components.filter(c => !c.parent_id);
+    const groupKeywords = ['SAYISAL', 'SÖZEL', 'EŞİT AĞIRLIK', 'DİL'];
+    const hasYksGroup = tops.some(c => (c.ad || '').toUpperCase().includes('YKS')) || tops.some(c => groupKeywords.some(k => (c.ad || '').toUpperCase().includes(k)));
+    if (!hasYksGroup) return tops;
+    return tops.filter(c => !['TYT', 'AYT'].includes((c.ad || '').toUpperCase()));
+  }, [components]);
+  const subComponents = useMemo(() => selectedComponent ? components.filter(c => c.parent_id === selectedComponent.id) : [], [components, selectedComponent]);
+  const virtualOturumlar = useMemo(() => {
+    if (!selectedComponent || subComponents.length > 0) return [];
+    const tops = components.filter(c => !c.parent_id);
+    return tops.filter(c => ['TYT', 'AYT'].includes((c.ad || '').toUpperCase()));
+  }, [components, selectedComponent, subComponents]);
 
   useEffect(() => {
     if (isResourceEditorOpen && resourceInputRef.current && document.activeElement !== resourceInputRef.current) {
@@ -577,6 +592,7 @@ const DersDetayTab = () => {
   const handleExamSelect = async (exam) => {
     setSelectedExam(exam);
     setSelectedComponent(null);
+    setSelectedSubComponent(null);
     setCourses([]);
     setSelectedCourse(null);
     setTopics([]);
@@ -593,11 +609,30 @@ const DersDetayTab = () => {
 
   const handleComponentSelect = async (component) => {
     setSelectedComponent(component);
+    setSelectedSubComponent(null);
     setSelectedCourse(null);
     setTopics([]);
     setIsResourceEditorOpen(false);
-    const courseData = await fetchApi(`${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(component.id)}`);
+    const hasSub = components.some(c => c.parent_id === component.id);
+    const tops = components.filter(c => !c.parent_id);
+    const hasTopLevelOturum = tops.some(c => ['TYT','AYT'].includes((c.ad || '').toUpperCase()));
+    if (hasSub || hasTopLevelOturum) {
+      setCourses([]);
+    } else {
+      const courseData = await fetchApi(`${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(component.id)}`);
+      if (courseData.success) setCourses(courseData.subjects || []);
+      else setCourses([]);
+    }
+  };
+
+  const handleSubComponentSelect = async (subComp) => {
+    setSelectedSubComponent(subComp);
+    setSelectedCourse(null);
+    setTopics([]);
+    setIsResourceEditorOpen(false);
+    const courseData = await fetchApi(`${API_BASE}/php-backend/api/get_exam_subjects.php?componentId=${encodeURIComponent(subComp.id)}`);
     if (courseData.success) setCourses(courseData.subjects || []);
+    else setCourses([]);
   };
 
   const handleCourseSelect = async (course) => {
@@ -689,6 +724,7 @@ const DersDetayTab = () => {
       ders_id: selectedCourse.id,
       kaynak_adi: resourceForm.kaynak_adi,
       kaynak_tipi: resourceForm.kaynak_tipi,
+      seviye: resourceForm.seviye || 'orta',
     }).toString();
     const data = await fetchApi(createUrl, {
       method: 'POST',
@@ -697,7 +733,7 @@ const DersDetayTab = () => {
     });
     if (data.success) {
       setEditingResource(null);
-      setResourceForm({ kaynak_adi: '', kaynak_tipi: 'video' });
+      setResourceForm({ kaynak_adi: '', kaynak_tipi: 'video', seviye: 'orta' });
       fetchResources();
     } else {
       console.error("Kaynak kaydedilemedi:", data.message);
@@ -757,7 +793,7 @@ const DersDetayTab = () => {
         </h4>
         <button onClick={() => { setIsResourceEditorOpen(false); setEditingResource(null); setResourceForm({ kaynak_adi: '' }); }} style={{background: 'none', border: 'none', fontSize: 18, cursor: 'pointer'}}>&times;</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr auto', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 160px auto', gap: 10, marginBottom: 16 }}>
         <input
           ref={resourceInputRef}
           value={resourceForm.kaynak_adi}
@@ -768,6 +804,15 @@ const DersDetayTab = () => {
           placeholder="Kitap Adı"
           style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px' }}
         />
+        <select
+          value={resourceForm.seviye || 'orta'}
+          onChange={e => setResourceForm(f => ({ ...f, seviye: e.target.value }))}
+          style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px' }}
+        >
+          <option value="kolay">Kolay</option>
+          <option value="orta">Orta</option>
+          <option value="zor">Zor</option>
+        </select>
         <button onClick={saveResource} style={{ background: '#6a1b9a', color: 'white', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>Kaydet</button>
       </div>
       <div>
@@ -775,9 +820,10 @@ const DersDetayTab = () => {
           <div key={res.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
             <div>
               <div style={{ fontWeight: 500 }}>{res.kaynak_adi}</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>{res.seviye ? `Seviye: ${res.seviye}` : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setEditingResource(res); setResourceForm({ kaynak_adi: res.kaynak_adi }); }} style={{ padding: '4px 8px', fontSize: 11, borderRadius: 6, border: '1px solid #e5e7eb', background: 'white' }}>Düzenle</button>
+              <button onClick={() => { setEditingResource(res); setResourceForm({ kaynak_adi: res.kaynak_adi, seviye: res.seviye || 'orta' }); }} style={{ padding: '4px 8px', fontSize: 11, borderRadius: 6, border: '1px solid #e5e7eb', background: 'white' }}>Düzenle</button>
               <button onClick={() => deleteResource(res.id)} style={{ padding: '4px 8px', fontSize: 11, borderRadius: 6, border: '1px solid #ef4444', background: '#ef4444', color: 'white' }}>Sil</button>
             </div>
           </div>
@@ -790,7 +836,15 @@ const DersDetayTab = () => {
     <div>
       <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
         <SelectionColumn title="Sınav Seçin" items={exams} selectedItem={selectedExam} onSelect={handleExamSelect} />
-        {components.length > 0 && <SelectionColumn title="Bileşen Seçin" items={components} selectedItem={selectedComponent} onSelect={handleComponentSelect} />}
+        {components.length > 0 && <SelectionColumn title="Bileşen Seçin" items={rootComponents} selectedItem={selectedComponent} onSelect={handleComponentSelect} />}
+        {selectedComponent && (subComponents.length > 0 || virtualOturumlar.length > 0) && (
+          <SelectionColumn
+            title="Oturum Seçin"
+            items={subComponents.length > 0 ? subComponents : virtualOturumlar}
+            selectedItem={selectedSubComponent}
+            onSelect={handleSubComponentSelect}
+          />
+        )}
         {courses.length > 0 && <SelectionColumn title="Ders Seçin" items={courses} selectedItem={selectedCourse} onSelect={handleCourseSelect} displayProperty="ders_adi" />}
       </div>
 
@@ -800,7 +854,7 @@ const DersDetayTab = () => {
             <h3 style={{ color: '#111827', fontSize: 16 }}>
               Konu ve Kaynak Yönetimi: <span style={{ color: '#6a1b9a' }}>{selectedCourse.ders_adi}</span>
             </h3>
-            <button onClick={handleManageResources} disabled={!selectedTopic} style={{ background: selectedTopic ? '#6a1b9a' : '#6a1b9a55', color: 'white', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: selectedTopic ? 'pointer' : 'not-allowed' }}>
+            <button onClick={handleManageResources} style={{ background: '#6a1b9a', color: 'white', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>
               Kaynakları Yönet
             </button>
           </div>
@@ -866,7 +920,63 @@ const SimpleModal = ({ isOpen, onClose, title, children, onSave }) => {
     );
 };
 
-const ManagementColumn = ({ title, items, selectedItem, onSelect, onAdd, onEdit, onDelete, renderItem }) => {
+const ManagementColumn = ({ title, items, selectedItem, onSelect, onAdd, onEdit, onDelete, renderItem, isDraggable = false, onDragEnd }) => {
+    
+    const renderList = () => {
+        if (items.length === 0) {
+            return <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 20 }}>Kayıt yok.</div>;
+        }
+
+        const renderItemContent = (item, provided = null, index) => (
+            <div
+                key={item.id}
+                ref={provided?.innerRef}
+                {...(provided?.draggableProps || {})}
+                {...(provided?.dragHandleProps || {})}
+                onClick={() => onSelect && onSelect(item)}
+                style={{
+                    padding: '10px',
+                    marginBottom: 8,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: selectedItem?.id === item.id ? '#6a1b9a10' : '#f9fafb',
+                    border: selectedItem?.id === item.id ? '1px solid #6a1b9a' : '1px solid #e5e7eb',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    ...(provided?.draggableProps.style || {})
+                }}
+            >
+                <div style={{ flex: 1, marginRight: 8 }}>{renderItem ? renderItem(item, index) : item.ad || item.ders_adi || item.konu_adi}</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                    <FontAwesomeIcon icon={faEdit} style={{ color: '#4b5563', fontSize: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onEdit && onEdit(item); }} />
+                    <FontAwesomeIcon icon={faTrash} style={{ color: '#ef4444', fontSize: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onDelete && onDelete(item); }} />
+                </div>
+            </div>
+        );
+
+        if (isDraggable && onDragEnd) {
+            return (
+                <DragDropContext onDragEnd={onDragEnd}>
+                    <Droppable droppableId="management-list">
+                        {(provided) => (
+                            <div ref={provided.innerRef} {...provided.droppableProps}>
+                                {items.map((item, index) => (
+                                    <Draggable key={item.id} draggableId={String(item.id)} index={index}>
+                                        {(provided) => renderItemContent(item, provided, index)}
+                                    </Draggable>
+                                ))}
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                </DragDropContext>
+            );
+        }
+
+        return items.map((item, index) => renderItemContent(item, null, index));
+    };
+
     return (
         <div style={{ minWidth: 280, flex: 1, background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', padding: 16, display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -876,33 +986,7 @@ const ManagementColumn = ({ title, items, selectedItem, onSelect, onAdd, onEdit,
                 </button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
-                {items.length === 0 ? (
-                    <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 20 }}>Kayıt yok.</div>
-                ) : (
-                    items.map(item => (
-                        <div
-                            key={item.id}
-                            onClick={() => onSelect && onSelect(item)}
-                            style={{
-                                padding: '10px',
-                                marginBottom: 8,
-                                borderRadius: 8,
-                                cursor: 'pointer',
-                                background: selectedItem?.id === item.id ? '#6a1b9a10' : '#f9fafb',
-                                border: selectedItem?.id === item.id ? '1px solid #6a1b9a' : '1px solid #e5e7eb',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                            }}
-                        >
-                            <div style={{ flex: 1, marginRight: 8 }}>{renderItem ? renderItem(item) : item.ad || item.ders_adi || item.konu_adi}</div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                <FontAwesomeIcon icon={faEdit} style={{ color: '#4b5563', fontSize: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onEdit && onEdit(item); }} />
-                                <FontAwesomeIcon icon={faTrash} style={{ color: '#ef4444', fontSize: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onDelete && onDelete(item); }} />
-                            </div>
-                        </div>
-                    ))
-                )}
+                {renderList()}
             </div>
         </div>
     );
@@ -923,9 +1007,20 @@ const ExamManagementTab = () => {
     const [modalConfig, setModalConfig] = useState({ isOpen: false, type: null, data: null });
     const [formData, setFormData] = useState({});
 
-    // Bileşenleri hiyerarşik olarak ayır
-    const rootComponents = useMemo(() => components.filter(c => !c.parent_id), [components]);
+    // Bileşenleri hiyerarşik olarak ayır ve YKS grupları -> TYT/AYT kurgusunu düzelt
+    const rootComponents = useMemo(() => {
+        const tops = components.filter(c => !c.parent_id);
+        const groupKeywords = ['SAYISAL', 'SÖZEL', 'EŞİT AĞIRLIK', 'DİL'];
+        const hasYksGroup = tops.some(c => (c.ad || '').toUpperCase().includes('YKS')) || tops.some(c => groupKeywords.some(k => (c.ad || '').toUpperCase().includes(k)));
+        if (!hasYksGroup) return tops;
+        return tops.filter(c => !['TYT', 'AYT'].includes((c.ad || '').toUpperCase()));
+    }, [components]);
     const subComponents = useMemo(() => selectedComponent ? components.filter(c => c.parent_id === selectedComponent.id) : [], [components, selectedComponent]);
+    const virtualOturumlar = useMemo(() => {
+        if (!selectedComponent || subComponents.length > 0) return [];
+        const tops = components.filter(c => !c.parent_id);
+        return tops.filter(c => ['TYT', 'AYT'].includes((c.ad || '').toUpperCase()));
+    }, [components, selectedComponent, subComponents]);
 
     useEffect(() => {
         fetchExams();
@@ -1001,10 +1096,15 @@ const ExamManagementTab = () => {
         // Ancak bu kontrolü render sırasında değil burada yapmak için güncel components listesine ihtiyacımız var
         // State güncellenmeden önceki components listesini kullanabiliriz
         const hasSub = components.some(c => c.parent_id === comp.id);
-        if (!hasSub) {
-            fetchSubjects(selectedExam.id, comp.id);
-        } else {
+        const tops = components.filter(c => !c.parent_id);
+        const hasTopLevelOturum = tops.some(c => ['TYT','AYT'].includes((c.ad || '').toUpperCase()));
+        if (hasSub) {
             setSubjects([]);
+        } else if (hasTopLevelOturum) {
+            // TYT/AYT üstte duruyorsa sanal alt bileşen gibi göster, ders fetch etme
+            setSubjects([]);
+        } else {
+            fetchSubjects(selectedExam.id, comp.id);
         }
     };
 
@@ -1027,6 +1127,42 @@ const ExamManagementTab = () => {
     const handleSelectTopic = (topic) => {
         setSelectedTopic(topic);
         fetchSubTopics(topic.id);
+    };
+
+    const handleTopicDragEnd = async (result) => {
+        if (!result.destination) return;
+        if (result.destination.index === result.source.index) return;
+        
+        const newTopics = Array.from(topics);
+        const [reorderedItem] = newTopics.splice(result.source.index, 1);
+        newTopics.splice(result.destination.index, 0, reorderedItem);
+        
+        setTopics(newTopics);
+        
+        const newOrder = newTopics.map(t => t.id);
+        await fetchApi(`${API_BASE}/php-backend/api/update_topic_order.php`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic_ids: newOrder, type: 'topic' })
+        });
+    };
+
+    const handleSubTopicDragEnd = async (result) => {
+        if (!result.destination) return;
+        if (result.destination.index === result.source.index) return;
+        
+        const newSubTopics = Array.from(subTopics);
+        const [reorderedItem] = newSubTopics.splice(result.source.index, 1);
+        newSubTopics.splice(result.destination.index, 0, reorderedItem);
+        
+        setSubTopics(newSubTopics);
+        
+        const newOrder = newSubTopics.map(t => t.id);
+        await fetchApi(`${API_BASE}/php-backend/api/update_topic_order.php`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic_ids: newOrder, type: 'subTopic' })
+        });
     };
 
     const openModal = (type, data = null) => {
@@ -1146,10 +1282,10 @@ const ExamManagementTab = () => {
                 />
             )}
 
-            {selectedComponent && subComponents.length > 0 && (
+            {selectedComponent && (subComponents.length > 0 || virtualOturumlar.length > 0) && (
                 <ManagementColumn 
                     title="Oturumlar / Alt Bileşenler" 
-                    items={subComponents} 
+                    items={subComponents.length > 0 ? subComponents : virtualOturumlar} 
                     selectedItem={selectedSubComponent} 
                     onSelect={handleSelectSubComponent}
                     onAdd={() => openModal('subComponent')}
@@ -1187,7 +1323,9 @@ const ExamManagementTab = () => {
                     onAdd={() => openModal('topic')}
                     onEdit={(item) => openModal('topic', item)}
                     onDelete={(item) => handleDelete('topic', item)}
-                    renderItem={(item) => item.konu_adi}
+                    renderItem={(item, index) => `${index + 1}. ${item.konu_adi}`}
+                    isDraggable={true}
+                    onDragEnd={handleTopicDragEnd}
                 />
             )}
 
@@ -1200,7 +1338,9 @@ const ExamManagementTab = () => {
                     onAdd={() => openModal('subTopic')}
                     onEdit={(item) => openModal('subTopic', item)}
                     onDelete={(item) => handleDelete('subTopic', item)}
-                    renderItem={(item) => item.konu_adi}
+                    renderItem={(item, index) => `${index + 1}. ${item.alt_konu_adi || item.konu_adi}`}
+                    isDraggable={true}
+                    onDragEnd={handleSubTopicDragEnd}
                 />
             )}
 
@@ -1414,11 +1554,10 @@ const AdminDashboard = () => {
       <main style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
         {activeTab === 'dashboard' && <DashboardTab />}
         {activeTab === 'users' && <UsersTab />}
+        {activeTab === 'muhasebe' && <AdminMuhasebeTab />}
         {activeTab === 'exam-management' && <ExamManagementTab />}
         {activeTab === 'ders-detay' && <DersDetayTab />}
         {activeTab === 'course-style' && <CourseStyleTab />}
-        {activeTab === 'students' && <div><h2>Öğrenciler</h2><p>Bu alan yapım aşamasındadır.</p></div>}
-        {activeTab === 'teachers' && <div><h2>Öğretmenler</h2><p>Bu alan yapım aşamasındadır.</p></div>}
         {activeTab === 'reports' && <div><h2>Raporlar</h2><p>Bu alan yapım aşamasındadır.</p></div>}
       </main>
     </div>

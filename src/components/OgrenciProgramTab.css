@@ -1857,40 +1857,32 @@
 
 .topic-analysis-filters {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  align-items: flex-start;
-  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
 }
 
 .filter-group {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .filter-group label {
-  font-weight: 700;
-  font-size: 10px;
-  color: #6b7280;
+  font-weight: 600;
+  font-size: 14px;
+  color: #374151;
   white-space: nowrap;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .topic-analysis-select {
-  padding: 6px 4px;
+  padding: 8px 12px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  font-size: 11px;
-  min-width: 0;
-  width: 100%;
+  font-size: 14px;
+  min-width: 150px;
   background: white;
   cursor: pointer;
-  height: 32px;
 }
 
 .topic-analysis-select:focus {
@@ -1905,25 +1897,11 @@
   gap: 8px;
 }
 
-.topic-analysis-date-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.topic-analysis-date-range label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #6b7280;
-}
-
 .topic-analysis-date-input {
-  padding: 6px 8px;
+  padding: 8px 12px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .topic-analysis-table-container {

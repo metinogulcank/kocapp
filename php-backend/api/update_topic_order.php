@@ -32,9 +32,12 @@ if (!is_array($ids) || count($ids) === 0) {
     exit;
 }
 
+$type = isset($json['type']) ? $json['type'] : (isset($_POST['type']) ? $_POST['type'] : 'topic');
+$table = ($type === 'subTopic') ? 'sinav_alt_konulari' : 'sinav_konulari';
+
 try {
     $db->beginTransaction();
-    $stmt = $db->prepare("UPDATE sinav_konulari SET sira = :sira WHERE id = :id");
+    $stmt = $db->prepare("UPDATE $table SET sira = :sira WHERE id = :id");
     foreach ($ids as $index => $topicId) {
         $sira = $index + 1;
         $id = is_string($topicId) ? trim($topicId) : $topicId;

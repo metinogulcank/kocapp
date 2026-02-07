@@ -118,7 +118,6 @@ const getSubjectIcon = (ders) => {
 
 const VeliPanel = () => {
   const navigate = useNavigate();
-  const [topicSortOption, setTopicSortOption] = useState('basariDesc');
   const [activeMenu, setActiveMenu] = useState('ana-sayfa');
   const [parent, setParent] = useState(null);
   const [student, setStudent] = useState(null);
@@ -207,6 +206,12 @@ const VeliPanel = () => {
   const [payments, setPayments] = useState([]);
   const [pendingPayments, setPendingPayments] = useState([]);
   const [paymentsFilter, setPaymentsFilter] = useState('tum');
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [selectedPendingPayment, setSelectedPendingPayment] = useState(null);
+  const [payMethod, setPayMethod] = useState('Kredi Kartı');
+  const [paying, setPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
   
   const menuItems = [
     { id: 'ana-sayfa', icon: faHome, label: 'Ana Sayfa' },
@@ -368,19 +373,27 @@ const VeliPanel = () => {
   }, [activeMenu, student]);
   useEffect(() => {
     if (activeMenu !== 'muhasebe') return;
-    const odemelerData = [
-      { tarih: '2025-11-05', tutar: 2500, yontem: 'Banka EFT', aciklama: 'Kasım taksit' },
-      { tarih: '2025-10-05', tutar: 2500, yontem: 'Kredi Kartı', aciklama: 'Ekim taksit' },
-      { tarih: '2025-09-05', tutar: 2500, yontem: 'Nakit', aciklama: 'Eylül taksit' },
-      { tarih: '2025-08-05', tutar: 2500, yontem: 'Banka EFT', aciklama: 'Ağustos taksit' }
-    ];
-    const bekleyenData = [
-      { sonTarih: '2026-01-15', tutar: 1500, aciklama: 'Ocak taksit' },
-      { sonTarih: '2026-02-15', tutar: 1500, aciklama: 'Şubat taksit' }
-    ];
-    setPayments(odemelerData);
-    setPendingPayments(bekleyenData);
-  }, [activeMenu]);
+    if (!student?.id) return;
+    const fetchPayments = async () => {
+      setPaymentsLoading(true);
+      try {
+        const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_payments.php?studentId=${encodeURIComponent(student.id)}`);
+        if (data.success) {
+          setPayments(Array.isArray(data.payments) ? data.payments : []);
+          setPendingPayments(Array.isArray(data.pendingPayments) ? data.pendingPayments : []);
+        } else {
+          setPayments([]);
+          setPendingPayments([]);
+        }
+      } catch (e) {
+        setPayments([]);
+        setPendingPayments([]);
+      } finally {
+        setPaymentsLoading(false);
+      }
+    };
+    fetchPayments();
+  }, [activeMenu, student]);
   
   useEffect(() => {
     if (parent) {
@@ -2071,30 +2084,9 @@ const VeliPanel = () => {
                   >
                     ← Ders Değiştir
                   </button>
-                  <div style={{flex: 1}}>
+                  <div>
                     <h3 style={{fontSize: '22px', fontWeight: 700, color: '#1f2937', margin: 0}}>{selectedSubject}</h3>
                     <p style={{fontSize: '14px', color: '#6b7280', margin: 0}}>Konu bazlı başarı dağılımı</p>
-                  </div>
-                  <div>
-                    <select
-                      value={topicSortOption}
-                      onChange={(e) => setTopicSortOption(e.target.value)}
-                      style={{
-                        padding: '10px 16px',
-                        borderRadius: 10,
-                        border: '1px solid #e5e7eb',
-                        background: 'white',
-                        color: '#374151',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        outline: 'none'
-                      }}
-                    >
-                      <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
-                      <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
-                      <option value="alphabetical">Alfabetik (A-Z)</option>
-                      <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
-                    </select>
                   </div>
                 </div>
                 {Object.keys(topicStats || {}).length === 0 ? (
@@ -2105,24 +2097,7 @@ const VeliPanel = () => {
                 ) : (
                   <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                     {Object.entries(topicStats)
-                      .sort((a, b) => {
-                        const [konuA, statsA] = a;
-                        const [konuB, statsB] = b;
-                        
-                        if (topicSortOption === 'basariDesc') {
-                          return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                        }
-                        if (topicSortOption === 'basariAsc') {
-                          return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                        }
-                        if (topicSortOption === 'alphabetical') {
-                          return konuA.localeCompare(konuB);
-                        }
-                        if (topicSortOption === 'alphabeticalDesc') {
-                          return konuB.localeCompare(konuA);
-                        }
-                        return 0;
-                      })
+                      .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                       .map(([konu, stats]) => {
                         const topicPercent = stats.basariYuzdesi || 0;
                         const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -2403,31 +2378,10 @@ const VeliPanel = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{padding: '20px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12}}>
-              <div style={{flex: 1}}>
+              <div>
                 <h3 style={{margin: 0, fontSize: 20, fontWeight: 700, color: '#111827'}}>{selectedDersForDetail} - Konu Detayları</h3>
                 <p style={{margin: 0, marginTop: 4, fontSize: 13, color: '#6b7280'}}>Bu derse ait programlanan konuların performans dağılımı</p>
               </div>
-              <select
-                value={topicSortOption}
-                onChange={(e) => setTopicSortOption(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  border: '1px solid #e5e7eb',
-                  background: 'white',
-                  color: '#374151',
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                  marginRight: 8
-                }}
-              >
-                <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
-                <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
-                <option value="alphabetical">Alfabetik (A-Z)</option>
-                <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
-              </select>
               <button
                 onClick={() => {
                   setShowDersDetailModal(false);
@@ -2442,24 +2396,7 @@ const VeliPanel = () => {
               {dersDetailTopics[selectedDersForDetail] && Object.keys(dersDetailTopics[selectedDersForDetail]).length > 0 ? (
                 <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
                   {Object.entries(dersDetailTopics[selectedDersForDetail])
-                    .sort((a, b) => {
-                      const [konuA, statsA] = a;
-                      const [konuB, statsB] = b;
-                      
-                      if (topicSortOption === 'basariDesc') {
-                        return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                      }
-                      if (topicSortOption === 'basariAsc') {
-                        return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                      }
-                      if (topicSortOption === 'alphabetical') {
-                        return konuA.localeCompare(konuB);
-                      }
-                      if (topicSortOption === 'alphabeticalDesc') {
-                        return konuB.localeCompare(konuA);
-                      }
-                      return 0;
-                    })
+                    .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                     .map(([konu, topicStats]) => {
                       const topicPercent = topicStats.basariYuzdesi || 0;
                       const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -3701,7 +3638,21 @@ const VeliPanel = () => {
                       <div style={{fontSize: 12, color: '#6b7280'}}>{b.aciklama}</div>
                     </div>
                     <div style={{textAlign: 'right'}}>
-                      <span style={{padding: '6px 10px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12, fontWeight: 700}}>Bekliyor</span>
+                      <button
+                        onClick={() => { setSelectedPendingPayment(b); setPayMethod('Kredi Kartı'); setPaymentError(''); setPayModalOpen(true); }}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          border: 'none',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          color: '#fff',
+                          background: 'linear-gradient(135deg, #6a1b9a, #8e24aa)'
+                        }}
+                      >
+                        Öde
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -3713,6 +3664,80 @@ const VeliPanel = () => {
               </div>
             </div>
           </div>
+          {payModalOpen && selectedPendingPayment && (
+            <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}}>
+              <div style={{background: '#fff', borderRadius: 16, padding: 24, width: 420, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid #e5e7eb'}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12}}>
+                  <h3 style={{margin: 0, fontSize: 18, fontWeight: 800, color: '#111827'}}>Ödeme Al</h3>
+                  <button onClick={() => setPayModalOpen(false)} style={{background: 'transparent', border: 'none', fontSize: 18, cursor: 'pointer'}}>✕</button>
+                </div>
+                <div style={{display: 'grid', gap: 12}}>
+                  <div style={{fontSize: 14, color: '#6b7280'}}>Tutar</div>
+                  <div style={{fontSize: 24, fontWeight: 800}}>{formatAmount(selectedPendingPayment.tutar)}</div>
+                  <label style={{fontSize: 14, color: '#6b7280'}}>Ödeme Yöntemi</label>
+                  <select
+                    value={payMethod}
+                    onChange={(e) => setPayMethod(e.target.value)}
+                    style={{padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 14}}
+                  >
+                    <option value="Kredi Kartı">Kredi Kartı (iyzico)</option>
+                    <option value="Banka EFT">Banka EFT</option>
+                    <option value="Nakit">Nakit</option>
+                  </select>
+                  {paymentError && <div style={{color: '#dc2626', fontSize: 13}}>{paymentError}</div>}
+                  <button
+                    onClick={async () => {
+                      if (!student?.id) return;
+                      setPaying(true);
+                      setPaymentError('');
+                      try {
+                        const res = await safeFetchJson(`${API_BASE}/php-backend/api/accept_payment.php`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            studentId: student.id,
+                            amount: selectedPendingPayment.tutar,
+                            method: payMethod,
+                            description: selectedPendingPayment.aciklama || '',
+                            pendingId: selectedPendingPayment.id || 0
+                          })
+                        });
+                        if (res.success) {
+                          setPayModalOpen(false);
+                          setSelectedPendingPayment(null);
+                          const refresh = await safeFetchJson(`${API_BASE}/php-backend/api/get_payments.php?studentId=${encodeURIComponent(student.id)}`);
+                          if (refresh.success) {
+                            setPayments(Array.isArray(refresh.payments) ? refresh.payments : []);
+                            setPendingPayments(Array.isArray(refresh.pendingPayments) ? refresh.pendingPayments : []);
+                          }
+                        } else {
+                          setPaymentError(res.message || 'Ödeme alınamadı');
+                        }
+                      } catch (e) {
+                        setPaymentError('Bağlantı hatası');
+                      } finally {
+                        setPaying(false);
+                      }
+                    }}
+                    disabled={paying}
+                    style={{
+                      marginTop: 8,
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      border: 'none',
+                      fontSize: 14,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      color: '#fff',
+                      background: paying ? '#9ca3af' : 'linear-gradient(135deg, #10b981, #22c55e)'
+                    }}
+                  >
+                    {paying ? 'İşleniyor...' : 'Ödemeyi Tamamla'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

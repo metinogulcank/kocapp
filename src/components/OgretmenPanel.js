@@ -44,6 +44,7 @@ import studentImg from '../assets/student-img.png';
 import Bildirimler from './Bildirimler';
 import Kaynaklar from './Kaynaklar';
 import OgretmenProfilTab from './OgretmenProfilTab';
+import OgretmenMuhasebeTab from './OgretmenMuhasebeTab';
 import OgrenciProgramTab from './OgrenciProgramTab';
 import { EXAM_CATEGORY_OPTIONS } from '../constants/examSubjects';
 // Ders görselleri
@@ -154,7 +155,7 @@ const formatAreaLabel = (area, studentInfo = null) => {
 
 const OgretmenPanel = () => {
   const navigate = useNavigate();
-  const [activeMenu, setActiveMenu] = useState('ogrenciler');
+  const [activeMenu, setActiveMenu] = useState('profil');
   const [activeTab, setActiveTab] = useState('konular');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentPanelActive, setStudentPanelActive] = useState(false);
@@ -173,6 +174,13 @@ const OgretmenPanel = () => {
   const openAccountModal = (item) => {
     setSelectedAccount(item);
     setIsAccountModalOpen(true);
+    setAccountPaymentError('');
+    setNewPaymentAmount('');
+    setNewPaymentMethod('Kredi Kartı');
+    setNewPaymentDesc('');
+    if (item && item.id) {
+      fetchAccountPayments(item.id);
+    }
   };
 
   const closeAccountModal = () => {
@@ -205,8 +213,8 @@ const OgretmenPanel = () => {
   };
 
   const menuItems = [
-    { id: 'ogrenciler', icon: faUsers, label: 'Öğrenciler' },
     { id: 'profil', icon: faUser, label: 'Profilim' },
+    { id: 'ogrenciler', icon: faUsers, label: 'Öğrenciler' },
     { id: 'bildirimler', icon: faBell, label: 'Bildirim Gönder' },
     { id: 'kendi-bildirimlerim', icon: faBell, label: 'Bildirimlerim' },
     { id: 'muhasebe', icon: faCreditCard, label: 'Muhasebe' },
@@ -298,7 +306,7 @@ const MEETING_DAY_OPTIONS = [
   const [studentsLoading, setStudentsLoading] = useState(true);
   const [availableExams, setAvailableExams] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [topicSortOption, setTopicSortOption] = useState('basariDesc');
+  const [notificationTargetStudent, setNotificationTargetStudent] = useState(null);
 
   // Shake animation state
   const [shakeFields, setShakeFields] = useState({});
@@ -398,6 +406,35 @@ const MEETING_DAY_OPTIONS = [
     });
   }, [students]);
 
+  const [accountPayments, setAccountPayments] = useState([]);
+  const [accountPendingPayments, setAccountPendingPayments] = useState([]);
+  const [accountPaymentsLoading, setAccountPaymentsLoading] = useState(false);
+  const [newPaymentAmount, setNewPaymentAmount] = useState('');
+  const [newPaymentMethod, setNewPaymentMethod] = useState('Kredi Kartı');
+  const [newPaymentDesc, setNewPaymentDesc] = useState('');
+  const [acceptingPayment, setAcceptingPayment] = useState(false);
+  const [accountPaymentError, setAccountPaymentError] = useState('');
+
+  const fetchAccountPayments = async (studentId) => {
+    if (!studentId) return;
+    setAccountPaymentsLoading(true);
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_payments.php?studentId=${encodeURIComponent(studentId)}`);
+      if (data.success) {
+        setAccountPayments(Array.isArray(data.payments) ? data.payments : []);
+        setAccountPendingPayments(Array.isArray(data.pendingPayments) ? data.pendingPayments : []);
+      } else {
+        setAccountPayments([]);
+        setAccountPendingPayments([]);
+      }
+    } catch (e) {
+      setAccountPayments([]);
+      setAccountPendingPayments([]);
+    } finally {
+      setAccountPaymentsLoading(false);
+    }
+  };
+
   const filteredAccounting = useMemo(() => {
     return accountingData.filter((item) => {
     const matchesSearch = item.name
@@ -422,26 +459,47 @@ const MEETING_DAY_OPTIONS = [
   });
   }, [accountingData, accountingFilters]);
 
-  // Muhasebe: üst özetler için basit hesaplamalar
+  // Muhasebe: üst özetler backend'den
   const now = new Date();
-  const { monthIncome, yearIncome, unpaidTotal } = useMemo(() => {
-    const allPayments = accountingData.flatMap((s) => s.history);
-  const monthIncome = allPayments
-    .filter((p) => {
-      const d = new Date(p.date);
-      return p.status === 'paid' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, p) => sum + p.amount, 0);
-  const yearIncome = allPayments
-    .filter((p) => {
-      const d = new Date(p.date);
-      return p.status === 'paid' && d.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, p) => sum + p.amount, 0);
-  // Basit varsayım: her gecen ödeme 1000 TL
-  const unpaidTotal = accountingData.reduce((sum, s) => sum + s.overdueCount * 1000, 0);
-    return { monthIncome, yearIncome, unpaidTotal };
-  }, [accountingData]);
+  const [monthIncome, setMonthIncome] = useState(0);
+  const [yearIncome, setYearIncome] = useState(0);
+  const [unpaidTotal, setUnpaidTotal] = useState(0);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [studentsPaymentStatuses, setStudentsPaymentStatuses] = useState({});
+
+  useEffect(() => {
+    if (activeMenu !== 'muhasebe') return;
+    const fetchSummary = async () => {
+      setSummaryLoading(true);
+      try {
+        const sum = await safeFetchJson(`${API_BASE}/php-backend/api/get_accounting_summary.php`);
+        if (sum.success) {
+          setMonthIncome(sum.monthIncome || 0);
+          setYearIncome(sum.yearIncome || 0);
+          setUnpaidTotal(sum.unpaidTotal || 0);
+        }
+      } catch (e) {}
+      setSummaryLoading(false);
+    };
+    const scheduleNotifs = async () => {
+      try { await safeFetchJson(`${API_BASE}/php-backend/api/schedule_due_notifications.php?days=5`, { method: 'POST' }); } catch (e) {}
+    };
+    const fetchStatuses = async () => {
+      try {
+        const ids = (students || []).map(s => s.id).filter(Boolean);
+        if (ids.length === 0) { setStudentsPaymentStatuses({}); return; }
+        const data = await safeFetchJson(`${API_BASE}/php-backend/api/get_students_payment_statuses.php?studentIds=${encodeURIComponent(ids.join(','))}`);
+        if (data.success) {
+          setStudentsPaymentStatuses(data.statuses || {});
+        }
+      } catch (e) {
+        setStudentsPaymentStatuses({});
+      }
+    };
+    fetchSummary();
+    scheduleNotifs();
+    fetchStatuses();
+  }, [activeMenu, students]);
 
   // Öğrenci ekleme modalı için state
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -842,6 +900,106 @@ const MEETING_DAY_OPTIONS = [
     }
     return true;
   };
+
+  // Kaynak önerileri: AI ve kişisel öneriler state/aksiyonları
+  const [aiRecSubjectId, setAiRecSubjectId] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState('');
+  const [aiSuggestionsLoading, setAiSuggestionsLoading] = useState(false);
+  const [studentRecommendations, setStudentRecommendations] = useState([]);
+  const [studentRecommendationsLoading, setStudentRecommendationsLoading] = useState(false);
+
+  const getCurrentTeacherId = () => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user'));
+      return user?.id || '';
+    } catch { return ''; }
+  };
+
+  const fetchStudentRecommendations = async () => {
+    const studentId = selectedStudent?.id;
+    if (!studentId) return;
+    setStudentRecommendationsLoading(true);
+    try {
+      const url = `${API_BASE}/php-backend/api/get_student_recommendations.php?studentId=${encodeURIComponent(studentId)}${aiRecSubjectId ? `&dersId=${encodeURIComponent(aiRecSubjectId)}` : ''}`;
+      const data = await safeFetchJson(url);
+      if (data.success) {
+        setStudentRecommendations(data.recommendations || []);
+      } else {
+        setStudentRecommendations([]);
+      }
+    } catch (e) {
+      setStudentRecommendations([]);
+    } finally {
+      setStudentRecommendationsLoading(false);
+    }
+  };
+
+  const refreshAiSuggestions = async () => {
+    const studentId = selectedStudent?.id;
+    const teacherId = getCurrentTeacherId();
+    if (!studentId || !teacherId) return;
+    setAiSuggestionsLoading(true);
+    try {
+      const url = `${API_BASE}/php-backend/api/generate_student_resource_suggestions.php?studentId=${encodeURIComponent(studentId)}&teacherId=${encodeURIComponent(teacherId)}${aiRecSubjectId ? `&dersId=${encodeURIComponent(aiRecSubjectId)}` : ''}`;
+      const data = await safeFetchJson(url);
+      if (data.success && data.suggestions) {
+        setAiSuggestions(data.suggestions || '');
+      } else {
+        setAiSuggestions('');
+      }
+    } catch (e) {
+      setAiSuggestions('');
+    } finally {
+      setAiSuggestionsLoading(false);
+    }
+  };
+
+  const addRecommendationFromText = async (line) => {
+    const studentId = selectedStudent?.id;
+    const teacherId = getCurrentTeacherId();
+    if (!studentId || !teacherId) return;
+    const clean = String(line || '').trim();
+    if (!clean) return;
+    const payload = {
+      studentId,
+      teacherId,
+      dersId: aiRecSubjectId || '',
+      kaynakAdi: clean.replace(/^•\s*/, ''),
+      kaynakTipi: 'kitap',
+      kaynakUrl: '',
+      seviye: 'orta'
+    };
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/add_student_recommendation.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (data.success) {
+        fetchStudentRecommendations();
+      }
+    } catch (e) {}
+  };
+
+  const deleteStudentRecommendation = async (id) => {
+    if (!id) return;
+    try {
+      const data = await safeFetchJson(`${API_BASE}/php-backend/api/delete_student_recommendation.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (data.success) {
+        setStudentRecommendations(prev => prev.filter(r => r.id !== id));
+      }
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    if (activeMenu === 'kaynak-onerileri' && selectedStudent?.id) {
+      fetchStudentRecommendations();
+    }
+  }, [activeMenu, selectedStudent?.id, aiRecSubjectId]);
   
   useEffect(() => {
     const fetchGenelDenemeSubjects = async () => {
@@ -1824,13 +1982,13 @@ const MEETING_DAY_OPTIONS = [
   }, [activeMenu, selectedStudent, dersBasariExamType]);
 
   // Kaynak ve Konu İlerlemesi - Veri çekme
-  const fetchKonuIlerlemesi = async () => {
+  const fetchKonuIlerlemesi = async (silent = false) => {
     const studentIdForPayload = selectedStudent?.id || selectedStudent?.studentId || selectedStudent?.student_id;
     const dersForPayload = (selectedDersForIlerleme || '').trim();
     if (!studentIdForPayload || !dersForPayload) {
       return;
     }
-    setKonuIlerlemesiLoading(true);
+    if (!silent) setKonuIlerlemesiLoading(true);
     try {
       const data = await safeFetchJson(
         `${API_BASE}/php-backend/api/get_konu_ilerlemesi.php?studentId=${studentIdForPayload}&ders=${encodeURIComponent(dersForPayload)}`
@@ -1838,11 +1996,33 @@ const MEETING_DAY_OPTIONS = [
       const existingKonular = data.success && Array.isArray(data.konular) ? data.konular : [];
       let finalKonular = existingKonular;
 
-      const subject = dynamicSubjectsForIlerleme.find(s => s.ders_adi === dersForPayload);
+      let subject = dynamicSubjectsForIlerleme.find(s => s.ders_adi === dersForPayload);
+
+      // Eğer subject bulunamadıysa ve ID'ye ihtiyacımız varsa, tüm derslerden bulmayı dene
+      if (!subject || !subject.id) {
+        // Önce soruAtamaSubjects içinde ara (eğer yüklendiyse)
+        subject = soruAtamaSubjects.find(s => s.ders_adi === dersForPayload);
+        
+        // Hala yoksa, backend'den tüm dersleri çekip bulmayı dene
+        if (!subject || !subject.id) {
+            try {
+                const allSubjectsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_student_subjects.php?alan=all`);
+                if (allSubjectsData.success && Array.isArray(allSubjectsData.subjects)) {
+                    subject = allSubjectsData.subjects.find(s => s.ders_adi === dersForPayload);
+                    // Bulunduysa soruAtamaSubjects'i de güncelle ki tekrar çekmesin
+                    if (subject) {
+                        setSoruAtamaSubjects(allSubjectsData.subjects);
+                    }
+                }
+            } catch (e) {
+                console.error('Fallback ders arama hatası:', e);
+            }
+        }
+      }
 
       if (subject && subject.id) {
         try {
-          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}&includeSubtopics=true`);
+          const topicsData = await safeFetchJson(`${API_BASE}/php-backend/api/get_subject_topics.php?dersId=${encodeURIComponent(subject.id)}&includeSubtopics=true&_t=${Date.now()}`);
           if (topicsData.success && Array.isArray(topicsData.topics) && topicsData.topics.length > 0) {
             let dersResources = [];
             try {
@@ -1906,81 +2086,109 @@ const MEETING_DAY_OPTIONS = [
             });
             
             // Parents listesini güncelle
-            parents = inferredParents;
+            parents = inferredParents.sort((a, b) => (Number(a.sira) || 0) - (Number(b.sira) || 0));
 
             children.forEach(c => childKeys.add(normalize(c.konu_adi)));
 
-            const mergedParents = (parents.length > 0 ? parents : allTopics).map((p, index) => {
-              const pId = String(p.id || '').trim();
-              const konuAdi = p.konu_adi;
-              const key = normalize(konuAdi);
-              const existing = key ? existingMap.get(key) : null;
+            // Helper to construct item
+            const constructItem = (existing, p, index) => {
+                const konuAdi = p ? p.konu_adi : existing.konu;
+                const pId = p ? String(p.id || '').trim() : null;
 
-              let kaynaklar = dersResources.map(r => ({ ...r }));
-              if (existing && Array.isArray(existing.kaynaklar) && existing.kaynaklar.length > 0) {
-                const existingByName = new Map();
-                existing.kaynaklar.forEach(res => {
-                  const kKey = normalize(res.kaynak_adi);
-                  if (kKey && !existingByName.has(kKey)) {
-                    existingByName.set(kKey, res);
-                  }
-                });
-                const mergedResources = [];
-                dersResources.forEach(dr => {
-                  const dKey = normalize(dr.kaynak_adi);
-                  const ex = dKey ? existingByName.get(dKey) : null;
-                  if (ex) {
-                    mergedResources.push(ex);
-                  } else {
-                    mergedResources.push({ ...dr });
-                  }
-                });
-                existing.kaynaklar.forEach(res => {
-                  const rKey = normalize(res.kaynak_adi);
-                  if (!rKey) return;
-                  const inBase = dersResources.some(dr => normalize(dr.kaynak_adi) === rKey);
-                  if (!inBase) {
-                    mergedResources.push(res);
-                  }
-                });
-                kaynaklar = mergedResources;
-              }
+                let kaynaklar = dersResources.map(r => ({ ...r }));
+                
+                if (existing && Array.isArray(existing.kaynaklar) && existing.kaynaklar.length > 0) {
+                    const existingByName = new Map();
+                    existing.kaynaklar.forEach(res => {
+                        const kKey = normalize(res.kaynak_adi);
+                        if (kKey && !existingByName.has(kKey)) {
+                            existingByName.set(kKey, res);
+                        }
+                    });
+                    const mergedResources = [];
+                    dersResources.forEach(dr => {
+                        const dKey = normalize(dr.kaynak_adi);
+                        const ex = dKey ? existingByName.get(dKey) : null;
+                        if (ex) {
+                            mergedResources.push(ex);
+                        } else {
+                            mergedResources.push({ ...dr });
+                        }
+                    });
+                    existing.kaynaklar.forEach(res => {
+                        const rKey = normalize(res.kaynak_adi);
+                        if (!rKey) return;
+                        const inBase = dersResources.some(dr => normalize(dr.kaynak_adi) === rKey);
+                        if (!inBase) {
+                            mergedResources.push(res);
+                        }
+                    });
+                    kaynaklar = mergedResources;
+                }
 
-              const subtopics = childrenMap.has(pId) ? childrenMap.get(pId).map(c => c.konu_adi) : [];
+                // Subtopics: If admin parent exists, fetch from childrenMap (Admin Source of Truth)
+                // Else use existing subtopics (Teacher's saved state)
+                let subtopics = [];
+                if (pId && childrenMap.has(pId)) {
+                    subtopics = childrenMap.get(pId).map(c => c.konu_adi);
+                } else if (existing && Array.isArray(existing.subtopics)) {
+                    subtopics = existing.subtopics;
+                }
 
-              if (existing) {
+                if (existing) {
+                    return {
+                        ...existing,
+                        konu: konuAdi,
+                        sira: (existing && existing.sira !== undefined && existing.sira !== null)
+                            ? Number(existing.sira)
+                            : ((p && p.sira) ? Number(p.sira) : (index + 1)),
+                        kaynaklar,
+                        subtopics
+                    };
+                }
+
                 return {
-                  ...existing,
-                  konu: konuAdi,
-                  sira: p.sira || existing.sira || index + 1,
-                  kaynaklar,
-                  subtopics
+                    id: null,
+                    konu: konuAdi,
+                    sira: (existing && existing.sira !== undefined && existing.sira !== null)
+                        ? Number(existing.sira)
+                        : ((p && p.sira) ? Number(p.sira) : (index + 1)),
+                    durum: 'Konuya Gelinmedi',
+                    tarih: null,
+                    kaynaklar,
+                    subtopics
                 };
-              }
+            };
 
-              return {
-                id: null,
-                konu: konuAdi,
-                sira: p.sira || index + 1,
-                durum: 'Konuya Gelinmedi',
-                tarih: null,
-                kaynaklar,
-                subtopics
-              };
+            let mergedParents = [];
+
+            // ALWAYS PRIORITIZE ADMIN ORDER (but keep saved data)
+            mergedParents = (parents.length > 0 ? parents : allTopics).map((p, index) => {
+                const key = normalize(p.konu_adi);
+                const existing = key ? existingMap.get(key) : null;
+                return constructItem(existing, p, index);
             });
 
             const usedKeys = new Set(mergedParents.map(t => normalize(t.konu)));
             const extras = [];
+            
+            // Check existing for any extras that didn't match
             existingKonular.forEach(k => {
-              const key = normalize(k.konu);
-              // Alt konu gibi görünenleri (tire ile başlayan) ana konu olarak ekleme
-              const isSubtopicStyle = (k.konu || '').trim().match(/^[-–]/);
-              if (key && !usedKeys.has(key) && !childKeys.has(key) && !isSubtopicStyle) {
-                extras.push(k);
-              }
+                const key = normalize(k.konu);
+                const isSubtopicStyle = (k.konu || '').trim().match(/^[-–]/);
+                if (key && !usedKeys.has(key) && !childKeys.has(key) && !isSubtopicStyle) {
+                    extras.push({
+                        ...k,
+                        sira: (k.sira !== undefined && k.sira !== null)
+                            ? Number(k.sira)
+                            : (mergedParents.length + extras.length + 1)
+                    });
+                }
             });
 
             finalKonular = [...mergedParents, ...extras];
+            // Explicitly sort final list by sira to ensure Admin order is respected visually
+            finalKonular.sort((a, b) => (Number(a.sira) || 0) - (Number(b.sira) || 0));
           }
         } catch (topicErr) {
           console.error('Varsayılan konular çekilemedi:', topicErr);
@@ -2014,7 +2222,7 @@ const MEETING_DAY_OPTIONS = [
       }));
       setKonuIlerlemesi(defaultKonular);
     } finally {
-      setKonuIlerlemesiLoading(false);
+      if (!silent) setKonuIlerlemesiLoading(false);
     }
   };
 
@@ -2049,7 +2257,7 @@ const MEETING_DAY_OPTIONS = [
           alert('Kaydedildi!');
         }
         // Kayıttan hemen sonra yeniden çekip sıralamayı kesinleştir
-        fetchKonuIlerlemesi();
+        fetchKonuIlerlemesi(true);
       } else {
         if (showAlert) {
           alert(data.message || 'Kaydetme hatası');
@@ -2075,6 +2283,7 @@ const MEETING_DAY_OPTIONS = [
 
   const handleKonuDragOver = (e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'move';
     }
@@ -2082,6 +2291,7 @@ const MEETING_DAY_OPTIONS = [
 
   const handleKonuDrop = (e, targetIndex) => {
     e.preventDefault();
+    e.stopPropagation();
     if (draggedKonu === null || draggedKonu === targetIndex) return;
     
     const newKonular = [...konuIlerlemesi];
@@ -4511,58 +4721,12 @@ const MEETING_DAY_OPTIONS = [
                               })}
                             </select>
                           </div>
-
-                          <div style={{flex: '1 1 250px'}}>
-                            <label style={{display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: 10, color: '#374151'}}>
-                              SIRALAMA:
-                            </label>
-                            <select
-                              value={topicSortOption}
-                              onChange={(e) => setTopicSortOption(e.target.value)}
-                              disabled={!selectedSubject}
-                              style={{
-                                width: '100%',
-                                padding: '12px 16px',
-                                border: '2px solid #e5e7eb',
-                                borderRadius: 12,
-                                fontSize: '15px',
-                                fontWeight: 500,
-                                color: selectedSubject ? '#374151' : '#9ca3af',
-                                background: selectedSubject ? 'white' : '#f3f4f6',
-                                cursor: selectedSubject ? 'pointer' : 'not-allowed',
-                                transition: 'all 0.2s',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                              }}
-                            >
-                              <option value="basariDesc">Başarı: Yüksekten Düşüğe</option>
-                              <option value="basariAsc">Başarı: Düşükten Yükseğe</option>
-                              <option value="alphabetical">Alfabetik (A-Z)</option>
-                              <option value="alphabeticalDesc">Alfabetik (Z-A)</option>
-                            </select>
-                          </div>
                         </div>
 
                         {selectedSubject && Object.keys(topicStats).length > 0 ? (
                           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16}}>
                             {Object.entries(topicStats)
-                              .sort((a, b) => {
-                                const [konuA, statsA] = a;
-                                const [konuB, statsB] = b;
-                                
-                                if (topicSortOption === 'basariDesc') {
-                                  return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                                }
-                                if (topicSortOption === 'basariAsc') {
-                                  return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                                }
-                                if (topicSortOption === 'alphabetical') {
-                                  return konuA.localeCompare(konuB);
-                                }
-                                if (topicSortOption === 'alphabeticalDesc') {
-                                  return konuB.localeCompare(konuA);
-                                }
-                                return 0;
-                              })
+                              .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                               .map(([konu, stats]) => {
                                 const topicPercent = stats.basariYuzdesi || 0;
                                 const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -5253,27 +5417,6 @@ const MEETING_DAY_OPTIONS = [
                             {selectedDersForDetail} - Konu Detayları
                           </h3>
                     </div>
-                    <select
-                      value={topicSortOption}
-                      onChange={(e) => setTopicSortOption(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        padding: '8px 14px',
-                        borderRadius: 10,
-                        border: '1px solid rgba(255,255,255,0.3)',
-                        background: 'rgba(255,255,255,0.1)',
-                        color: 'white',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        outline: 'none',
-                        marginRight: 16
-                      }}
-                    >
-                      <option value="basariDesc" style={{color: '#333'}}>Başarı: Yüksekten Düşüğe</option>
-                      <option value="basariAsc" style={{color: '#333'}}>Başarı: Düşükten Yükseğe</option>
-                      <option value="alphabetical" style={{color: '#333'}}>Alfabetik (A-Z)</option>
-                      <option value="alphabeticalDesc" style={{color: '#333'}}>Alfabetik (Z-A)</option>
-                    </select>
                         <button
                           onClick={() => {
                             setShowDersDetailModal(false);
@@ -5316,24 +5459,7 @@ const MEETING_DAY_OPTIONS = [
                             gap: 16
                           }}>
                             {Object.entries(dersDetailTopics[selectedDersForDetail])
-                              .sort((a, b) => {
-                                const [konuA, statsA] = a;
-                                const [konuB, statsB] = b;
-                                
-                                if (topicSortOption === 'basariDesc') {
-                                  return (statsB.basariYuzdesi || 0) - (statsA.basariYuzdesi || 0);
-                                }
-                                if (topicSortOption === 'basariAsc') {
-                                  return (statsA.basariYuzdesi || 0) - (statsB.basariYuzdesi || 0);
-                                }
-                                if (topicSortOption === 'alphabetical') {
-                                  return konuA.localeCompare(konuB);
-                                }
-                                if (topicSortOption === 'alphabeticalDesc') {
-                                  return konuB.localeCompare(konuA);
-                                }
-                                return 0;
-                              })
+                              .sort((a, b) => (b[1].basariYuzdesi || 0) - (a[1].basariYuzdesi || 0))
                               .map(([konu, topicStats]) => {
                                 const topicPercent = topicStats.basariYuzdesi || 0;
                                 const topicColor = topicPercent >= 75 ? '#10b981' : topicPercent >= 50 ? '#f59e0b' : '#ef4444';
@@ -9128,10 +9254,35 @@ const MEETING_DAY_OPTIONS = [
                   <div className="ai-oneriler">
                     <div className="section-header">
                       <h2>AI Destekli Kaynak Önerileri</h2>
-                      <button className="yenile-oneriler-btn">
-                        <FontAwesomeIcon icon={faChartLine} />
-                        Önerileri Yenile
-                      </button>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <select
+                          value={aiRecSubjectId}
+                          onChange={(e) => setAiRecSubjectId(e.target.value)}
+                          className="filter-select"
+                        >
+                          <option value="">Ders Seç (opsiyonel)</option>
+                          {(soruAtamaSubjects.length ? soruAtamaSubjects : dynamicSubjectsForIlerleme).map(s => (
+                            <option key={s.id} value={s.id}>{s.ders_adi}</option>
+                          ))}
+                        </select>
+                        <button className="yenile-oneriler-btn" onClick={refreshAiSuggestions} disabled={aiSuggestionsLoading}>
+                          <FontAwesomeIcon icon={faChartLine} />
+                          {aiSuggestionsLoading ? 'Yükleniyor...' : 'Önerileri Yenile'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', padding: 16, marginBottom: 16 }}>
+                      {aiSuggestions ? (
+                        aiSuggestions.split('\n').filter(l => l.trim()).map((line, idx) => (
+                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+                            <div style={{ color: '#374151' }}>{line}</div>
+                            <button className="action-btn onayla" onClick={() => addRecommendationFromText(line)}>Öneriyi Ekle</button>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ color: '#6b7280' }}>Öneri bulunamadı. Üstten ders seçip yenileyin.</div>
+                      )}
                     </div>
 
                     <div className="ai-oneriler-grid">
@@ -9361,10 +9512,26 @@ const MEETING_DAY_OPTIONS = [
                   <div className="kisisel-oneriler">
                     <div className="section-header">
                       <h2>Kişiselleştirilmiş Öneriler</h2>
-                      <button className="kisisel-analiz-btn">
-                        <FontAwesomeIcon icon={faRobot} />
-                        Kişisel Analiz Yap
-                      </button>
+                    </div>
+
+                    <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e5e7eb', padding: 16, marginBottom: 16 }}>
+                      {studentRecommendationsLoading ? (
+                        <div style={{ color: '#6b7280' }}>Yükleniyor...</div>
+                      ) : studentRecommendations.length === 0 ? (
+                        <div style={{ color: '#6b7280' }}>Öneri yok.</div>
+                      ) : (
+                        studentRecommendations.map(rec => (
+                          <div key={rec.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+                            <div>
+                              <div style={{ fontWeight: 500, color: '#111827' }}>{rec.kaynak_adi}</div>
+                              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                                {(rec.ders_id && ((soruAtamaSubjects.find(s => s.id === rec.ders_id)?.ders_adi) || (dynamicSubjectsForIlerleme.find(s => s.id === rec.ders_id)?.ders_adi))) || ''} {rec.seviye ? `• Seviye: ${rec.seviye}` : ''}
+                              </div>
+                            </div>
+                            <button className="action-btn reddet" onClick={() => deleteStudentRecommendation(rec.id)}>Sil</button>
+                          </div>
+                        ))
+                      )}
                     </div>
 
                     <div className="kisisel-grid">
@@ -9627,7 +9794,12 @@ const MEETING_DAY_OPTIONS = [
             <div
               key={item.id}
               className={`nav-item ${activeMenu === item.id ? 'active' : ''}`}
-              onClick={() => setActiveMenu(item.id)}
+              onClick={() => {
+                setActiveMenu(item.id);
+                if (item.id === 'bildirimler') {
+                  setNotificationTargetStudent(null);
+                }
+              }}
             >
               <span className="nav-icon">
                 <FontAwesomeIcon icon={item.icon} />
@@ -9829,248 +10001,15 @@ const MEETING_DAY_OPTIONS = [
           {activeMenu === 'profil' ? (
             <OgretmenProfilTab />
           ) : activeMenu === 'bildirimler' ? (
-            <Bildirimler students={students} userRole="teacher" />
+            <Bildirimler 
+              students={students} 
+              userRole="teacher" 
+              initialSelectedStudentId={notificationTargetStudent} 
+            />
           ) : activeMenu === 'kendi-bildirimlerim' ? (
             <Bildirimler students={students} filter="teacher-only" title="Bildirimlerim" userRole="teacher" />
           ) : activeMenu === 'muhasebe' ? (
-            <div className="muhasebe-content">
-              {/* Üst özet kutuları */}
-              <div className="summary-pills">
-                <div className="summary-pill">
-                  <div className="pill-title">{now.toLocaleString('tr-TR', { month: 'long' })} ayı toplam gelir</div>
-                  <div className="pill-amount">₺ {monthIncome.toLocaleString('tr-TR')}</div>
-                </div>
-                <div className="summary-pill">
-                  <div className="pill-title">{now.getFullYear()} Toplam gelir</div>
-                  <div className="pill-amount">₺ {yearIncome.toLocaleString('tr-TR')}</div>
-                </div>
-                <div className="summary-pill">
-                  <div className="pill-title">Ödenmeyen toplam gelir</div>
-                  <div className="pill-amount">₺ {unpaidTotal.toLocaleString('tr-TR')}</div>
-                </div>
-              </div>
-
-              {/* Başlık ve toplam */}
-              <div className="accounting-header">
-                <div className="header-right">
-                  <div className="header-actions">
-                    <button className="export-btn">Excel Dışa Aktar</button>
-                    <button className="export-btn">PDF İndir</button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Filtreler */}
-              <div className="accounting-filters">
-                <div className="filter-group">
-                  <label>Arama</label>
-                  <input
-                    className="filter-input"
-                    placeholder="Öğrenci ara..."
-                    value={accountingFilters.search}
-                    onChange={(e) =>
-                      setAccountingFilters({ ...accountingFilters, search: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="filter-group">
-                  <label>Ay</label>
-                  <select
-                    className="filter-select"
-                    value={accountingFilters.month}
-                    onChange={(e) =>
-                      setAccountingFilters({ ...accountingFilters, month: e.target.value })
-                    }
-                  >
-                    <option value="">Tümü</option>
-                    <option value="1">Ocak</option>
-                    <option value="2">Şubat</option>
-                    <option value="3">Mart</option>
-                    <option value="4">Nisan</option>
-                    <option value="5">Mayıs</option>
-                    <option value="6">Haziran</option>
-                    <option value="7">Temmuz</option>
-                    <option value="8">Ağustos</option>
-                    <option value="9">Eylül</option>
-                    <option value="10">Ekim</option>
-                    <option value="11">Kasım</option>
-                    <option value="12">Aralık</option>
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Yıl</label>
-                  <select
-                    className="filter-select"
-                    value={accountingFilters.year}
-                    onChange={(e) =>
-                      setAccountingFilters({ ...accountingFilters, year: e.target.value })
-                    }
-                  >
-                    <option value="">Tümü</option>
-                    <option value="2023">2023</option>
-                    <option value="2024">2024</option>
-                    <option value="2025">2025</option>
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Durum</label>
-                  <select
-                    className="filter-select"
-                    value={accountingFilters.status}
-                    onChange={(e) =>
-                      setAccountingFilters({ ...accountingFilters, status: e.target.value })
-                    }
-                  >
-                    <option value="">Tümü</option>
-                    <option value="odemesi-gecen">Ödemesi Geçen</option>
-                    <option value="odeme-tamam">Ödemesi Tamam</option>
-                  </select>
-                </div>
-                <button className="filter-btn">
-                  <FontAwesomeIcon icon={faFilter} />
-                  Filtrele
-                </button>
-              </div>
-
-              {/* Kare kartlar */}
-              <div className="overdue-grid">
-                {filteredAccounting.map((item) => (
-                  <div key={item.id} className="overdue-tile">
-                    <div className="tile-head">
-                      <div className="tile-title">Öğrenci Profili</div>
-                      <div className="tile-status">Çevrimiçi</div>
-                    </div>
-                    <div className="tile-body">
-                      <div className="tile-avatar">{item.gender === 'f' ? '👩' : '👨'}</div>
-                      <div className="tile-name">{item.name}</div>
-                      <div className="tile-sub">GEÇEN ÖDEME: <span className="overdue-count">{item.overdueCount}</span></div>
-                    </div>
-                    <div className="tile-footer">
-                      <button onClick={() => openAccountModal(item)} className="tile-detail">Detay</button>
-                    </div>
-                  </div>
-                ))}
-                {studentsLoading ? (
-                  <div className="empty-state">Yükleniyor...</div>
-                ) : filteredAccounting.length === 0 && students.length === 0 ? (
-                  <div className="empty-state">Henüz öğrenci eklenmemiş.</div>
-                ) : filteredAccounting.length === 0 ? (
-                  <div className="empty-state">Arama kriterlerinize uygun kayıt bulunamadı.</div>
-                ) : null}
-              </div>
-
-              {/* Alt aksiyonlar */}
-              <div className="muhasebe-actions">
-                <button className="action-button primary">
-                  <FontAwesomeIcon icon={faDownload} /> Excel Dışa Aktar
-                </button>
-                <button className="action-button secondary">
-                  <FontAwesomeIcon icon={faDownload} /> PDF İndir
-                </button>
-              </div>
-
-              {isAccountModalOpen && selectedAccount && (
-                <div className="modal-overlay" onClick={closeAccountModal}>
-                  <div className="modal-content student-modal" onClick={(e) => e.stopPropagation()}>
-                    <div className="modal-topbar">
-                      <button className="back-btn" onClick={closeAccountModal}>Geri</button>
-                      <div className="top-actions">
-                        <button className="pill-btn">PDF</button>
-                      </div>
-                    </div>
-
-                    <div className="student-header">
-                      <div className="avatar-lg">{selectedAccount.gender === 'f' ? '👩' : '👨'}</div>
-                      <div className="student-head-info">
-                        <div className="student-name-lg">{selectedAccount.name}</div>
-                        <div className="student-meta">Sınıf: {selectedAccount.className} · Kayıt Tarih: {new Date(selectedAccount.registeredAt).toLocaleDateString('tr-TR')}</div>
-                      </div>
-                      <div className="header-buttons">
-                        <button className="pill-btn">Düzenle</button>
-                        <button className="pill-btn">Mesaj Gönder</button>
-                      </div>
-                    </div>
-
-                    {/* Modal Sekmeleri */}
-                    <div className="student-modal-tabs">
-                      <button 
-                        className={`modal-tab ${accountModalTab === 'muhasebe' ? 'active' : ''}`}
-                        onClick={() => setAccountModalTab('muhasebe')}
-                      >
-                        Muhasebe
-                      </button>
-                      <button 
-                        className={`modal-tab ${accountModalTab === 'program' ? 'active' : ''}`}
-                        onClick={() => setAccountModalTab('program')}
-                      >
-                        Haftalık Program
-                      </button>
-                    </div>
-
-                    {/* Muhasebe Sekmesi */}
-                    {accountModalTab === 'muhasebe' && (
-                      <>
-                    <div className="student-modal-grid">
-                      <div className="card white">
-                        <div className="card-title">Ödeme Bilgileri</div>
-                        <div className="status-chip success">Ödemeler Tamamlandı</div>
-                        <div className="payment-row"><span>Son Ödeme:</span><strong>{new Date(selectedAccount.lastPayment).toLocaleDateString('tr-TR')}</strong></div>
-                        <div className="payment-row"><span>Geçen Ödeme Sayısı:</span><strong>{selectedAccount.overdueCount}</strong></div>
-                        <div className="split-actions">
-                          <button className="primary-sm">+ Ödeme Ekle</button>
-                          <button className="ghost-sm">Makbuz</button>
-                        </div>
-                      </div>
-
-                      <div className="card white">
-                        <div className="card-title">Öğretmen Notları</div>
-                        <div className="note-row">
-                          <input className="note-input" placeholder="Yeni not ekle..." />
-                          <button className="primary-sm">Kaydet</button>
-                        </div>
-                        <div className="note-item">10/03/2024: Derste çok basarılıydı.</div>
-                        <div className="note-item">05/002: Veli ile görüşüldü</div>
-                      </div>
-                    </div>
-
-                    <div className="card white full">
-                      <div className="card-title">Ödeme Geçmişi</div>
-                      <ul className="history-list">
-                        {selectedAccount.history.map((h, idx) => (
-                          <li key={idx} className="history-item">
-                            <span>{new Date(h.date).toLocaleDateString('tr-TR')}</span>
-                            <span>₺{h.amount.toLocaleString('tr-TR')}</span>
-                            <span className={h.status === 'paid' ? 'status-paid' : 'status-pending'}>
-                              {h.status === 'paid' ? 'Ödendi' : 'Beklemede'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                      </>
-                    )}
-
-                    {/* Program Sekmesi */}
-                    {accountModalTab === 'program' && (
-                      <div className="student-modal-program">
-                        <OgrenciProgramTab 
-                          student={{
-                            id: selectedAccount.id,
-                            name: selectedAccount.name,
-                            className: selectedAccount.className
-                          }} 
-                          teacherId={JSON.parse(localStorage.getItem('user'))?.id}
-                        />
-                      </div>
-                    )}
-
-                    <div className="modal-bottom">
-                      <button className="danger-btn">Çıkış Yap</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <OgretmenMuhasebeTab teacherId={JSON.parse(localStorage.getItem('user'))?.id} />
           ) : activeMenu === 'kaynaklar' ? (
             <Kaynaklar />
           ) : activeMenu === 'notlar' ? (
@@ -11021,6 +10960,32 @@ const MEETING_DAY_OPTIONS = [
                           </span>
                         </div>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNotificationTargetStudent(student.id);
+                          setActiveMenu('bildirimler');
+                        }}
+                        style={{
+                          width: '100%',
+                          marginTop: '12px',
+                          padding: '8px',
+                          backgroundColor: '#6a1b9a',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          fontSize: '14px',
+                          fontWeight: '500'
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faPaperPlane} />
+                        Bildirim Gönder
+                      </button>
                     </div>
 
                   </div>

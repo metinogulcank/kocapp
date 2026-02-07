@@ -22,11 +22,17 @@ if (!$data) {
 $id = isset($data->id) ? htmlspecialchars(strip_tags($data->id)) : null;
 $kaynak_adi = isset($data->kaynak_adi) ? htmlspecialchars(strip_tags($data->kaynak_adi)) : null;
 $kaynak_url = isset($data->kaynak_url) ? htmlspecialchars(strip_tags($data->kaynak_url)) : '';
+$seviye = isset($data->seviye) ? htmlspecialchars(strip_tags($data->seviye)) : null;
 
 if ($id && $kaynak_adi) {
     try {
-        $stmt = $db->prepare("UPDATE ders_kaynaklari SET kaynak_adi = ?, kaynak_url = ? WHERE id = ?");
-        $ok = $stmt->execute([$kaynak_adi, $kaynak_url, $id]);
+        if ($seviye !== null && $seviye !== '') {
+            $stmt = $db->prepare("UPDATE ders_kaynaklari SET kaynak_adi = ?, kaynak_url = ?, seviye = ? WHERE id = ?");
+            $ok = $stmt->execute([$kaynak_adi, $kaynak_url, $seviye, $id]);
+        } else {
+            $stmt = $db->prepare("UPDATE ders_kaynaklari SET kaynak_adi = ?, kaynak_url = ? WHERE id = ?");
+            $ok = $stmt->execute([$kaynak_adi, $kaynak_url, $id]);
+        }
         if ($ok) {
             echo json_encode(["success" => true, "message" => "Kaynak başarıyla güncellendi."]);
         } else {

@@ -27,6 +27,7 @@ $konu_id = isset($data->konu_id) ? htmlspecialchars(strip_tags($data->konu_id)) 
 $kaynak_adi = isset($data->kaynak_adi) ? htmlspecialchars(strip_tags($data->kaynak_adi)) : null;
 $kaynak_url = isset($data->kaynak_url) ? htmlspecialchars(strip_tags($data->kaynak_url)) : '';
 $kaynak_tipi = isset($data->kaynak_tipi) && $data->kaynak_tipi !== '' ? htmlspecialchars(strip_tags($data->kaynak_tipi)) : 'kitap';
+$seviye = isset($data->seviye) && $data->seviye !== '' ? htmlspecialchars(strip_tags($data->seviye)) : 'orta';
 
 // Tablo yoksa oluştur
 try {
@@ -35,6 +36,7 @@ try {
         ders_id VARCHAR(24) NOT NULL,
         kaynak_adi VARCHAR(255) NOT NULL,
         kaynak_tipi VARCHAR(32) DEFAULT 'kitap',
+        seviye VARCHAR(16) DEFAULT 'orta',
         kaynak_url VARCHAR(1024) DEFAULT '',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_ders_id (ders_id)
@@ -43,7 +45,6 @@ try {
     http_response_code(500);
     echo json_encode(["success" => false, "message" => "Veritabanı hatası: " . $e->getMessage()]);
     exit;
-}
 
 // konu_id geldiyse ders_id'e çevir
 if (!$ders_id && $konu_id) {
@@ -58,8 +59,8 @@ if (!$ders_id && $konu_id) {
 
 if ($ders_id && $kaynak_adi) {
     try {
-        $stmt = $db->prepare("INSERT INTO ders_kaynaklari (ders_id, kaynak_adi, kaynak_tipi, kaynak_url, created_at) VALUES (?, ?, ?, ?, NOW())");
-        $ok = $stmt->execute([$ders_id, $kaynak_adi, $kaynak_tipi, $kaynak_url]);
+        $stmt = $db->prepare("INSERT INTO ders_kaynaklari (ders_id, kaynak_adi, kaynak_tipi, kaynak_url, seviye, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+        $ok = $stmt->execute([$ders_id, $kaynak_adi, $kaynak_tipi, $kaynak_url, $seviye]);
         if ($ok) {
             http_response_code(201);
             $last_id = $db->lastInsertId();
@@ -71,7 +72,8 @@ if ($ders_id && $kaynak_adi) {
                     "ders_id" => $ders_id,
                     "kaynak_adi" => $kaynak_adi,
                     "kaynak_tipi" => $kaynak_tipi,
-                    "kaynak_url" => $kaynak_url
+                    "kaynak_url" => $kaynak_url,
+                    "seviye" => $seviye
                 ]
             ]);
         } else {
